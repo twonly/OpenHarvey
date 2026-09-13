@@ -205,7 +205,7 @@ class E2B:
         prior=self.binding(wid)
         latest=self.store.one('SELECT revision FROM model_versions WHERE org_id=? AND validated=1 ORDER BY revision DESC LIMIT 1',(self.models.scope(u),))
         warm=(wid in self.handles and prior and prior['status']=='ready' and wid not in self.unhealthy
-              and time.monotonic()-self.renewed.get(wid,0)<TTL-30
+              and wid in self.renewed and time.monotonic()-self.renewed[wid]<TTL-30
               and prior['template']==self.template and latest and prior['revision']==latest['revision']
               and (not prior['started'] or time.time()-prior['started']<600 or self.other_active(wid,t['id'])))
         if warm and not recovering:

@@ -525,7 +525,9 @@ class E2BTests(unittest.TestCase):
         self.cloud.renewed.clear()
         async def renew(seconds):calls.append('renew')
         async def health(rt):calls.append('health');return True
-        with patch.object(sbx,'set_timeout',side_effect=renew),patch.object(self.cloud,'healthy',side_effect=health):
+        # Linux runners may have monotonic uptime below TTL immediately after boot.
+        # An absent renewal timestamp must never count as a valid warm lease.
+        with patch('contract_web.e2b_runtime.time.monotonic',return_value=10),patch.object(sbx,'set_timeout',side_effect=renew),patch.object(self.cloud,'healthy',side_effect=health):
             self.run_async(self.cloud.prepare(self.u,self.current(t)))
         self.assertLess(calls.index('renew'),calls.index('health'))
         async def hanging(*args,**kwargs):await asyncio.sleep(10)
