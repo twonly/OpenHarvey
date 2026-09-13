@@ -62,4 +62,11 @@ dialog.workspace-tour{position:fixed;inset:0;width:100vw;height:100dvh;max-width
 }
 @media(prefers-color-scheme:dark){.account-usage .tour-trigger{border-color:#476b55}.account-usage .tour-trigger:hover{background:#365741}}
 body>header #username{min-width:0;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* Same border-ring motion as the Agent permission-loading indicator. */
+.demo-progress{display:flex;align-items:center;justify-content:center;gap:10px;margin:30px 0 12px;color:#718371}
+.demo-opening .demo-progress #status{margin:0}
+.demo-spinner{display:inline-block;width:16px;height:16px;border:1.5px solid var(--auth-line);border-top-color:var(--auth-accent);border-radius:50%;animation:demo-spin .7s linear infinite;flex:none}
+.demo-spinner[hidden]{display:none}
+@keyframes demo-spin{to{transform:rotate(360deg)}}
+@media(prefers-reduced-motion:reduce){.demo-spinner{animation:none}}
 @media(max-width:759px){body>header #username{max-width:48px;font-size:10px}}

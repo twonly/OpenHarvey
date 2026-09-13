@@ -26,6 +26,26 @@ test('registered identity shows email safely and never sends it to an avatar ser
  assert.equal(accountLabel({username:'admin'}),'admin');
 });
 
+test('demo spinner remains visible during both loading stages and stops on failure or captcha',async()=>{
+ const {runInNewContext}=await import('node:vm');
+ const source=readFileSync(new URL('../static/demo.js',import.meta.url),'utf8').replace(/^import .*;\n/,'');
+ const elements={status:{textContent:''},startDemo:{hidden:true},demoSpinner:{hidden:false}};
+ const calls=[];let destination;
+ const context={document:{getElementById:id=>elements[id]},location:{replace:url=>destination=url},api:path=>new Promise((resolve,reject)=>calls.push({path,resolve,reject}))};
+ const tick=()=>new Promise(resolve=>setImmediate(resolve));
+ runInNewContext(source,context);
+ assert.equal(elements.demoSpinner.hidden,false);assert.equal(calls[0].path,'/api/demo/start');
+ calls[0].resolve({});await tick();assert.equal(calls[1].path,'/api/demo/workspace');assert.equal(elements.demoSpinner.hidden,false);
+ calls[1].reject(Object.assign(new Error('请先完成人机验证'),{status:403}));await tick();
+ assert.equal(elements.demoSpinner.hidden,true);assert.equal(elements.startDemo.hidden,false);assert.equal(calls[2].path,'/api/auth/config');
+ calls[2].resolve({});await tick();
+ const retry=elements.startDemo.onclick();assert.equal(elements.demoSpinner.hidden,false);assert.equal(elements.startDemo.hidden,true);
+ calls[3].resolve({});await tick();calls[4].resolve({workspace_id:'demo-test'});await retry;
+ assert.equal(destination,'/agent#demo-test');assert.equal(elements.demoSpinner.hidden,false);
+ const css=readFileSync(new URL('../static/account-ui.css',import.meta.url),'utf8');
+ assert.ok(css.includes('@media(prefers-reduced-motion:reduce){.demo-spinner{animation:none}}'));
+});
+
 test('discovered models fill a blank row, preserve manual configuration and do not duplicate IDs',()=>{
  const existing=[{id:'custom/one',label:'业务模型',context:200000,output:16000,enabled:false,native:{reasoning:true}},
   {id:'',label:'我的模型',context:96000,output:4096,enabled:true}];
