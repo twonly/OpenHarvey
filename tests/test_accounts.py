@@ -113,6 +113,14 @@ class AccountTests(fixtures.WorkbenchTests):
         row=self.store.one("SELECT * FROM auth_flows WHERE kind='orca'");self.assertNotIn(row['verifier'],url)
         self.assertEqual(self.client.get('/orca/callback?state=wrong&code=x').status_code,400)
 
+    @patch.dict(os.environ,{'CW_PUBLIC_ORIGIN':'https://openharvey.com','CW_ADDITIONAL_ORIGINS':'https://agent.tokrace.com,https://backend.example.com'})
+    def test_model_callback_uses_allowlisted_browser_host_behind_proxy(self):
+        from urllib.parse import urlparse,parse_qs
+        for host,expected in (('openharvey.com','https://openharvey.com'),('agent.tokrace.com','https://agent.tokrace.com'),('evil.example','https://openharvey.com')):
+            r=self.client.get('/orca/connect-url',headers={'Host':'backend.example.com','X-Forwarded-Host':host})
+            self.assertEqual(r.status_code,200,r.text)
+            self.assertEqual(parse_qs(urlparse(r.json()['auth_url']).query)['callback_url'],[expected+'/orca/callback'])
+
     def test_private_config_hidden_even_from_other_admin(self):
         skill=self.app.state.settings.save_item(self.store.one('SELECT * FROM users WHERE id=?',(self.uid,)),'skill',{'content':{'label':'私有','description':'private','body':'PRIVATE COMPANY MATERIAL','files':{}},'scope':'personal'})
         self.store.execute("UPDATE users SET role='admin' WHERE id=?",(self.bid,));self.login('bob')

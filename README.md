@@ -2,7 +2,7 @@
 
 **An open-source AI workspace for contracts and tender documents.**
 
-[中文说明](README.zh-CN.md) · [Website](https://openharvey.com) · [English website](https://openharvey.com/en) · [Try the workspace](https://agent.tokrace.com/demo) · [Deployment](docs/deployment.md)
+[中文说明](README.zh-CN.md) · [Website](https://openharvey.com) · [English website](https://openharvey.com/en) · [Try the workspace](https://openharvey.com/demo) · [Deployment](docs/deployment.md)
 
 OpenHarvey connects source documents, conversations and saved deliverables. It is built around the structure of contract work: clauses, attachments, evidence, review playbooks and revisions.
 

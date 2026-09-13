@@ -10,7 +10,7 @@
 <link rel="stylesheet" href="/static/agent-ui.css?v=20260913-2">
 <link rel="stylesheet" href="/static/settings-ui.css?v=20260912-7">
 <link rel="stylesheet" href="/static/account-ui.css?v=20260913-header-2">
-<link rel="stylesheet" href="/static/workspace-controls.css?v=20260913-4">
+<link rel="stylesheet" href="/static/workspace-controls.css?v=20260913-5">
 </head>
 <body data-auth="loading">
 <div id="authLoading" class="auth-loading" role="status"><p id="authLoadingText">正在打开工作台…</p><button id="authRetry" hidden>重新连接</button></div>
@@ -66,11 +66,12 @@
       <section id="docPane">
         <div id="documentToolbar">
           <div class="document-picker"><span id="documentTitle">选择文档</span><select id="documentSelect" aria-label="选择当前对话材料" hidden></select></div>
-          <div class="document-actions"><button class="shell-toggle pane-close" data-close-pane="source" type="button" aria-label="隐藏合同原文" title="隐藏合同原文">×</button>
-            <div class="source-mode" role="group" aria-label="文档显示方式"><button id="viewOriginal" aria-pressed="true">原件</button><button id="viewText" aria-pressed="false">文本</button></div>
+          <div class="source-mode" role="group" aria-label="文档显示方式"><button id="viewOriginal" aria-pressed="true">原件</button><button id="viewText" aria-pressed="false">文本</button></div>
+          <div class="document-actions">
             <button id="sourceOutlineToggle" type="button" aria-expanded="false" aria-controls="sourceOutline" disabled>☷ 目录</button>
             <button id="sourceSearchToggle" type="button" aria-expanded="false" aria-controls="sourceTools" title="搜索当前文档（⌘ / Ctrl + F）" disabled>搜索</button>
             <details id="documentMore" class="document-more"><summary aria-label="更多文档操作" title="更多文档操作">⋯</summary><div class="document-more-menu"><button data-layout="compare" aria-pressed="false">对照审阅</button><a id="originalLink" hidden>下载原件</a></div></details>
+            <button class="shell-toggle pane-close" data-close-pane="source" type="button" aria-label="隐藏合同原文" title="隐藏合同原文">×</button>
             <button class="shell-toggle pane-expand" data-layout="source" aria-label="放大合同文档" title="放大合同文档" aria-pressed="false"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5"/></svg></button>
           </div>
         </div>
@@ -86,8 +87,9 @@
           <span id="artifactTitle">产出物</span>
           <div id="artifactStrip"><button id="artifactPrev" class="artifact-scroll" aria-label="向左滚动产出物" hidden>‹</button><div id="artifactTabs" aria-label="已保存的产出物"></div><button id="artifactNext" class="artifact-scroll" aria-label="向右滚动产出物" hidden>›</button></div>
           <div class="artifact-picker" title="查看全部产出物"><span aria-hidden="true">⌄</span><select id="artifactSelect" aria-label="选择产出物" hidden></select></div>
-          <div class="artifact-actions"><button class="shell-toggle pane-close" data-close-pane="artifact" type="button" aria-label="隐藏产出物" title="隐藏产出物">×</button>
+          <div class="artifact-actions">
             <details id="artifactMore" class="document-more"><summary aria-label="更多产出物操作" title="更多产出物操作">⋯</summary><div class="document-more-menu"><div id="artifactInfo" hidden></div><button data-layout="compare" aria-pressed="false">对照审阅</button><button id="compareArtifacts" disabled>两份对照</button><div id="artifactDownloads"></div></div></details>
+            <button class="shell-toggle pane-close" data-close-pane="artifact" type="button" aria-label="隐藏产出物" title="隐藏产出物">×</button>
             <button class="shell-toggle pane-expand" data-layout="artifact" aria-label="放大产出物" title="放大产出物" aria-pressed="false"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5"/></svg></button>
           </div>
         </div>

@@ -2,9 +2,19 @@ import {threadListHTML} from '../static/thread-ui.js';
 import {accountLabel,accountIdentityHTML} from '../static/account-identity.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
 import {applyEvent,runIssue,unchangedEvent} from '../static/events.js';
 import {markdown} from '../static/markdown.js';
 import {addDiscoveredModel,waitForOperation} from '../static/provider-utils.js';
+
+test('reading toolbar keeps modes left and ordered actions at the right',()=>{
+ const html=readFileSync(new URL('../static/index.html',import.meta.url),'utf8');
+ const doc=html.split('id="documentToolbar"')[1].split('id="sourceTools"')[0];
+ const art=html.split('class="artifact-actions"')[1].split('id="artifactPair"')[0];
+ const ordered=(text,tokens)=>{const positions=tokens.map(x=>text.indexOf(x));assert.ok(positions.every(x=>x>=0));assert.deepEqual([...positions].sort((a,b)=>a-b),positions);};
+ ordered(doc,['class="source-mode"','class="document-actions"','id="sourceOutlineToggle"','id="sourceSearchToggle"','id="documentMore"','data-close-pane="source"','aria-label="放大合同文档"']);
+ ordered(art,['id="artifactMore"','data-close-pane="artifact"','aria-label="放大产出物"']);
+});
 
 test('registered identity shows email safely and never sends it to an avatar service',()=>{
  const user={account_kind:'personal',username:'user-b2bab2208ca70844',email:'sample@example.com'};

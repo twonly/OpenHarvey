@@ -27,8 +27,14 @@ def register_auth(app,accounts,models,manager,user):
     def origin(request):
         default=os.environ.get('CW_PUBLIC_ORIGIN',str(request.base_url)).rstrip('/')
         allowed={default}|{v.strip().rstrip('/') for v in os.environ.get('CW_ADDITIONAL_ORIGINS','').split(',') if v.strip()}
-        candidate=request.headers.get('origin',str(request.base_url)).rstrip('/')
-        return candidate if candidate in allowed else default
+        candidate=request.headers.get('origin')
+        if candidate:return candidate.rstrip('/') if candidate.rstrip('/') in allowed else default
+        # The website proxy preserves the browser host. Only explicitly allowed
+        # HTTPS origins may become callback targets; never trust arbitrary hosts.
+        forwarded=request.headers.get('x-forwarded-host','')
+        for candidate in ('https://'+forwarded,str(request.base_url).rstrip('/')):
+            if candidate in allowed:return candidate
+        return default
     def config():
         url=os.environ.get('CW_SUPABASE_URL','').rstrip('/');key=os.environ.get('CW_SUPABASE_PUBLISHABLE_KEY','')
         if not url.startswith('https://') or not key:raise HTTPException(503,'注册登录尚未配置，请联系管理员')

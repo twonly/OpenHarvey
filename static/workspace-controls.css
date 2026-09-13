@@ -21,6 +21,12 @@ body>header #username{max-width:230px}body>header #username:has(.account-identit
 .usage-resource{color:#758b7c}.model-access-card{max-width:580px;margin:24px 0;padding:26px;border:1px solid var(--line,#dce5df);border-radius:14px;background:var(--surface,#fff)}
 .model-access-card h2{font-size:20px;margin:0 0 12px}.model-access-card p{line-height:1.85;color:var(--ink-2,#677c70);font-size:13px;margin:12px 0 20px}
 .pane-close{font-size:20px!important;line-height:1!important;min-width:28px}
+#documentToolbar{flex-wrap:wrap;gap:5px}
+#documentToolbar>.document-picker{flex-basis:100%}
+#documentToolbar>.source-mode{flex:none}
+#documentToolbar>.document-actions{width:auto;margin-left:auto}
+#documentToolbar>.document-actions>.pane-expand{margin-left:0}
+#artifactToolbar>.artifact-actions{margin-left:auto}
 #contextPane[data-source-hidden=true]>#docPane,#contextPane[data-artifact-hidden=true]>#artPane{display:none!important}
 #contextPane[data-source-hidden=true]>#contextSplit,#contextPane[data-artifact-hidden=true]>#contextSplit{display:none!important}
 #contextPane[data-source-hidden=true]>#artPane,#contextPane[data-artifact-hidden=true]>#docPane{flex:1!important;height:auto!important}
