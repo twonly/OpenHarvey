@@ -18,7 +18,23 @@ def register_marketing(app, root):
                   'security': t('安全与数据边界 | OpenHarvey', 'Security & Data Boundaries | OpenHarvey'),
                   'open-source': t('开源与自托管 | OpenHarvey', 'Open Source & Self-hosting | OpenHarvey'),
                   'harvey-alternative': t('面向合同任务的 Harvey 替代方案 | OpenHarvey', 'A Contract-focused Harvey Alternative | OpenHarvey')}
-        description = t('OpenHarvey 围绕合同与标书组织原文、附件、对话和产出。支持引用定位联动、原文溯源、可配置 Skills 与风险库、多格式交付和 E2B 沙箱执行。', 'OpenHarvey organizes contracts, tender documents, conversations and deliverables in one workspace, with source-linked review, configurable playbooks and sandboxed agents.')
+        descriptions = {
+            'home': t(
+                'OpenHarvey 是开源的合同与标书 AI 工作台，支持原文溯源、可配置 Skills 与风险库、多格式交付和 E2B 沙箱执行。',
+                'OpenHarvey is an open-source AI contract and tender workbench with source-linked review, configurable playbooks, deliverables and sandboxed agents.'),
+            'security': t(
+                '了解 OpenHarvey 如何处理合同数据、E2B 沙箱执行、模型凭据、持久化、删除、备份与自托管边界。',
+                'Learn how OpenHarvey handles contract data, sandboxed agent execution, model credentials, storage, deletion, backups and self-hosting boundaries.'),
+            'open-source': t(
+                '查看 OpenHarvey 开源合同 AI 工作台的 AGPL 许可证、系统架构、自托管方式、外部依赖与部署指南。',
+                "Explore OpenHarvey's AGPL-licensed contract AI workspace, architecture, self-hosting options, source code, dependencies and deployment guide."),
+            'harvey-alternative': t(
+                '从开源、自托管、合同原文溯源、业务规则、部署与数据边界等方面，了解 OpenHarvey 与 Harvey 的差异。',
+                "Compare OpenHarvey's open-source contract workspace with Harvey across self-hosting, source-linked review, business rules, deployment and data boundaries."),
+            'features': t(
+                '查看 OpenHarvey 合同 AI 工作台实景：原文溯源、风险清单、三大 Skills、多格式产出、沙箱执行与 BYOK。',
+                "See OpenHarvey's contract AI workspace in action: source-linked review, playbooks, flexible deliverables, Skills, sandboxing and BYOK.")}
+        description = descriptions[section]
         schema = {'@context':'https://schema.org','@type':'WebSite','name':'OpenHarvey','url':ORIGIN,'inLanguage':['zh-CN','en'],'description':description}
         zhurl = ORIGIN + ('/' if section=='home' else '/'+section)
         enurl = ORIGIN + '/en' + ('' if section=='home' else '/'+section)

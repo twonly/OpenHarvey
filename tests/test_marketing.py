@@ -9,11 +9,12 @@ from contract_web.product_showcase import FEATURES
 
 class Metadata(HTMLParser):
     def __init__(self,html):
-        super().__init__();self.links=[];self.scripts=[];self.capture=False;self.current='';self.lang=None;self.feed(html)
+        super().__init__();self.links=[];self.meta=[];self.scripts=[];self.capture=False;self.current='';self.lang=None;self.feed(html)
     def handle_starttag(self,tag,attrs):
         values=dict(attrs)
         if tag=='html':self.lang=values.get('lang')
         if tag=='link':self.links.append(values)
+        if tag=='meta':self.meta.append(values)
         if tag=='script' and values.get('type')=='application/ld+json':self.capture=True;self.current=''
     def handle_data(self,data):
         if self.capture:self.current+=data
@@ -38,6 +39,17 @@ class MarketingTests(unittest.TestCase):
             self.assertEqual({x['hreflang'] for x in metadata.links if x.get('rel')=='alternate'},{'zh-CN','en','x-default'})
             self.assertTrue(metadata.scripts)
         self.assertEqual(self.client.get('/en/',follow_redirects=False).status_code,308)
+
+    def test_each_public_page_has_a_unique_description_within_bing_limits(self):
+        descriptions=[]
+        for path in ('/','/en','/security','/en/security','/open-source','/en/open-source',
+                     '/harvey-alternative','/en/harvey-alternative','/features','/en/features'):
+            metadata=Metadata(self.client.get(path).text)
+            description=next(item['content'] for item in metadata.meta if item.get('name')=='description')
+            self.assertGreaterEqual(len(description),25,path)
+            self.assertLessEqual(len(description),160,path)
+            descriptions.append(description)
+        self.assertEqual(len(set(descriptions)),len(descriptions))
     def test_private_endpoints_excluded_from_index_and_public_pages_state_boundaries(self):
         robots=self.client.get('/robots.txt').text
         for private in ('/api/','/agent','/auth/','/traces','/trial-model/'):
