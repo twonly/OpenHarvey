@@ -1,0 +1,32 @@
+{
+  "model": "glm/your-glm-model-id",
+  "small_model": "glm/your-glm-model-id",
+  "enabled_providers": ["glm", "deepseek"],
+  "provider": {
+    "glm": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "智谱 GLM",
+      "options": {
+        "baseURL": "https://open.bigmodel.cn/api/paas/v4",
+        "apiKey": "{env:CW_GLM_API_KEY}"
+      },
+      "models": {
+        "your-glm-model-id": {
+          "name": "GLM",
+          "reasoning": true,
+          "interleaved": {"field": "reasoning_content"},
+          "limit": {"context": 128000, "output": 32768}
+        }
+      }
+    },
+    "deepseek": {
+      "options": {"apiKey": "{env:CW_DEEPSEEK_API_KEY}"},
+      "models": {
+        "your-deepseek-model-id": {
+          "name": "DeepSeek",
+          "limit": {"context": 128000, "output": 32768}
+        }
+      }
+    }
+  }
+}

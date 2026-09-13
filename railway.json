@@ -1,0 +1,19 @@
+{
+  "$schema": "https://railway.com/railway.schema.json",
+  "build": {
+    "builder": "DOCKERFILE",
+    "dockerfilePath": "deploy/Dockerfile.web"
+  },
+  "deploy": {
+    "startCommand": "uvicorn contract_web.app:create_app --factory --host 0.0.0.0 --port 8080 --workers 1 --timeout-graceful-shutdown 10",
+    "numReplicas": 1,
+    "sleepApplication": false,
+    "requiredMountPath": "/data",
+    "healthcheckPath": "/health",
+    "healthcheckTimeout": 120,
+    "restartPolicyType": "ON_FAILURE",
+    "restartPolicyMaxRetries": 5,
+    "overlapSeconds": 0,
+    "drainingSeconds": 15
+  }
+}

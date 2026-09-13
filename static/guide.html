@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>设置指南 · 合同工作台</title><meta name="description" content="了解合同工作台各项设置如何生效：Skills 指导任务步骤，风险库定义审查范围与公司基线，模型、立场和执行权限共同影响 Agent 的工作方式。"><link rel="icon" href="/static/brand/agent-logo-v1.png"><link rel="stylesheet" href="/static/product.css?v=20260913-1"><script src="/static/product-guide.js?v=20260913-1" defer></script></head>
+<body>
+<a class="skip-link" href="#main">跳到正文</a>
+<header class="site-header"><div class="nav-wrap"><a class="product-brand" href="/landing" aria-label="合同工作台首页"><img src="/static/brand/agent-logo-v1.png" width="34" height="34" alt=""><span>合同工作台<small>CONTRACT WORKBENCH</small></span></a><nav aria-label="主导航"><a href="/landing">产品介绍</a><a href="/guide" aria-current="page">设置指南</a><a class="button small" href="/spaces">进入工作台 <span aria-hidden="true">↗</span></a></nav></div></header>
+<main class="container" id="main">
+  <div class="guide-intro"><p class="eyebrow">THE WORKBENCH GUIDE</p><h1><span class="keep-phrase">让 Agent 按你的</span><span class="keep-phrase">标准工作。</span></h1><p>每一项设置，都有明确的作用。先理解 Skills、风险库和模型如何配合，再把个人偏好与公司经验放到合适的位置。</p></div>
+  <div class="guide-layout">
+    <nav class="guide-nav" aria-label="设置指南目录"><p>IN THIS GUIDE</p><a href="#relationship" aria-current="location">先理解三者的关系</a><a href="#general">01　通用设置</a><a href="#skills">02　Skills</a><a href="#risks">03　风险库</a><a href="#models">04　模型与服务</a><a href="#traces">05　执行记录</a><a href="#accounts">06　账号与试用</a><a href="#members">07　平台管理</a><a href="#faq">常见问题</a><small>本页是使用说明。<br>实际配置请进入工作台设置；<br>具体入口按账号角色显示。</small></nav>
+    <div class="guide-content">
+      <section class="guide-section" id="relationship"><p class="eyebrow">THE BIG PICTURE</p><h2><span class="keep-phrase">方法、标准与执行，</span><span class="keep-phrase">各有所长。</span></h2><p>你提出任务并提供材料。Agent 结合你的要求，使用相关 Skills 和风险库完成工作；原文始终是事实判断的依据。</p>
+        <div class="relationship-grid"><article><b>Skills</b><span>指导「怎么做」</span><p>定义任务步骤、何时使用、参考哪些资料，以及交付什么格式的成果。</p></article><article><b>风险库</b><span>规定「检查什么」</span><p>明确风险点、适用范围、公司基线和判定要点，形成完整审查的检查范围。</p></article><article><b>模型 / Agent</b><span>负责「实际执行」</span><p>理解请求、读取材料、选择方法、结合标准分析，并调用工具生成与保存文件。</p></article></div>
+        <div class="flow-note"><p><strong>一次完整风险审查：</strong>确认任务与立场 → 加载审查 Skill → 读取主合同全文与所选风险库 → 逐项分析并给出依据 → 校验与保存报告。</p></div>
+        <p>普通事实问答可以直接读取原文回答，无需每次启动整份合同审查。明确选择某个 Skill，会要求 Agent 加载该 Skill；自然语言任务则可由 Agent 按用途说明选择。</p>
+      </section>
+
+      <section class="guide-section" id="general"><p class="eyebrow">01 / PERSONAL PREFERENCES</p><div class="section-title-row"><h2>通用设置</h2><a href="/config">前往设置 ↗</a></div><p>设置日常工作的默认偏好，保存在你的账号下。对话中明确指定的立场与回答要求优先。</p>
+        <table class="settings-table"><thead><tr><th scope="col">设置项</th><th scope="col">用途与实际影响</th></tr></thead><tbody>
+          <tr><td>默认模型</td><td>决定默认由哪个已接入模型处理任务，影响理解、推理、速度和用量。对话中明确选择的模型优先；默认模型需先在「模型与服务」接入。</td></tr>
+          <tr><td>默认我方立场</td><td>例如甲方、乙方或实际公司身份。它影响 Agent 从谁的利益出发分析条款和提出建议；本次请求或对话中已确认的立场优先。</td></tr>
+          <tr><td>默认执行方式</td><td><strong>常规执行：</strong>允许当前工作目录的草稿写入和固定保存操作，额外命令按工具权限处理。<strong>谨慎执行：</strong>草稿写入和保存需确认。<strong>全权执行（云端沙箱）：</strong>允许沙箱内工具自动执行，包括额外命令，不逐项请求操作许可；仅适用于云端隔离沙箱。这些档位控制操作授权，不调整风险判定标准。</td></tr>
+          <tr><td>回答详略</td><td>简洁、标准、详细，影响表达篇幅与解释深度。完整审查仍需覆盖启用风险点，不能因「简洁」跳过检查。</td></tr>
+          <tr><td>恢复系统默认</td><td>清除个人通用偏好，使用系统默认值。不会删除合同、个人 Skills 或风险方案。</td></tr>
+          <tr><td>助手名称与用户称呼</td><td>默认称呼助手为“合同助手”，称呼你为“您”。首次进入可填写或跳过，之后可在这里修改，后续对话会沿用。</td></tr>
+          <tr><td>业务背景与补充指引</td><td>保存自己的业务领域和工作要求，仅用于本人的后续任务，不作为合同原文事实。</td></tr>
+        </tbody></table>
+        <div class="flow-note"><p><strong>何时生效：</strong>新设置用于后续任务，不改变正在生成的答复。已明确选择执行方式的对话保留自己的选择；未单独选择的对话在下次执行时使用默认值。</p></div>
+      </section>
+
+      <section class="guide-section" id="skills"><p class="eyebrow">02 / REUSABLE METHODS</p><div class="section-title-row"><h2>Skills：沉淀任务方法</h2><a href="/skills">管理 Skills ↗</a></div><p>Skill 是 Agent 可以按需读取的任务指引。适合把反复使用的工作步骤、业务参考和输出要求保存下来，例如合同摘要、风险审查或条款修改。</p>
+        <div class="scope-chips"><span><b>内置</b>只读，可复制</span><span><b>公开示例</b>只读，可复制</span><span><b>我的</b>个人维护与使用</span></div>
+        <table class="settings-table"><thead><tr><th scope="col">设置项</th><th scope="col">对 Agent 的作用</th></tr></thead><tbody>
+          <tr><td>显示名称</td><td>让你在列表中辨认任务，例如「付款安排专项检查」。主要服务于选择和管理。</td></tr>
+          <tr><td>用途说明</td><td>告诉 Agent <strong>什么时候适合使用</strong>这个 Skill。写清任务边界，例如「仅检查付款安排，整份合同审查使用合同风险审查 Skill」。</td></tr>
+          <tr><td>Markdown 正文</td><td>提供实际步骤、分析要求和输出格式。Agent 加载后按指引执行，例如先读全文、再核对基线、最后输出依据和建议。</td></tr>
+          <tr><td>参考文件</td><td>添加 Markdown / TXT 业务说明、范例或格式模板。在正文中写明何时读取哪份参考资料；添加文件不等于每次都会全文读取。</td></tr>
+          <tr><td>调用名称</td><td>用于明确选择任务的标识，例如 <code>/contract-review</code>。可通过快捷入口、输入 <code>/</code> 搜索，或直接使用调用名称。</td></tr>
+          <tr><td>适用范围与启用</td><td>范围决定谁能使用和维护；启用决定该 Skill 是否提供给 Agent。启用后按任务需要加载，不会让它在每次对话中自动执行。</td></tr>
+          <tr><td>复制与历史版本</td><td>复制内置或公开 Skill 为个人版本后调整。历史版本可查阅；执行记录保留当次配置，便于理解结果使用了哪份指引。</td></tr>
+        </tbody></table>
+        <h3>它具体改变哪些行为？</h3><ol class="numbered-steps"><li><strong>选择任务方法</strong>用途说明帮助 Agent 判断相关性；明确选择 Skill 会要求它加载对应指引。</li><li><strong>组织读取和分析</strong>正文与参考资料指导阅读顺序、分析重点和检查步骤。普通问答仍可直接进行。</li><li><strong>形成所需成果</strong>输出格式指导报告结构、表格和文件要求，保存仍以真实文件与回执为准。</li></ol>
+        <div class="guide-callout"><h3>改方法用 Skill，改公司标准用风险库。</h3><p>希望报告增加「谈判建议」一列，适合调整 Skill。希望公司付款基线从 60 日调整为 45 日，应修改所用风险方案。Skill 中的专项标准仅在该任务使用，不会自动合并进完整公司风险库。</p></div>
+        <p><strong>生效时机：</strong>保存后查看 Skills 页的合同环境状态；空闲环境会同步，运行中的任务结束后应用。以环境显示的生效版本为准，历史执行仍保留原版本。</p>
+      </section>
+
+      <section class="guide-section" id="risks"><p class="eyebrow">03 / REVIEW STANDARDS</p><div class="section-title-row"><h2>风险库：明确审查标准</h2><a href="/risks">管理风险库 ↗</a></div><p>风险库以「审查方案」组织风险点。完整公司风险审查读取当前方案中全部启用项，结合合同内容与我方立场逐项分析。它既提供检查范围，也提供公司接受条件与判定口径。</p>
+        <table class="settings-table"><thead><tr><th scope="col">设置项</th><th scope="col">对风险识别的作用</th></tr></thead><tbody>
+          <tr><td>方案名称与说明</td><td>帮助辨认适用场景，例如采购合同、服务合同。只有被选中的方案进入本次审查；新建或复制后还需要选择使用。</td></tr>
+          <tr><td>我的默认 / 公开示例</td><td>决定没有单独选择时使用哪份方案。顺序为：<strong>本次或对话选择 → 我的默认 → 公开示例</strong>。已有对话若已选择方案，修改个人默认不会覆盖该选择。</td></tr>
+          <tr><td>风险名称与编号</td><td>名称说明要检查的问题，编号用于关联检查项与报告结果。它们帮助逐项记录覆盖情况，不是关键词匹配规则。</td></tr>
+          <tr><td>分类</td><td>用于组织、筛选和归类风险，例如商法、财经、交付与服务。分类本身不决定是否命中。</td></tr>
+          <tr><td>适用行业与范围</td><td>帮助 Agent 判断这项规则是否适用于当前合同与业务。启用项仍要逐项判断适用性；不适用需要说明原因。</td></tr>
+          <tr><td>严重程度</td><td>提供风险重要性的分级口径，影响结果分级与关注顺序；调高等级不等于改变命中条件。</td></tr>
+          <tr><td>公司基线</td><td>写清公司期望的条件或底线，例如「付款期限原则上不超过 60 日」。它是 Agent 比较合同约定的重要标准，应同时写清条件与例外。</td></tr>
+          <tr><td>判定要点</td><td>将基线细化为可判断的问题，例如起算条件、例外约定、等效保护、跨条款约束。相比笼统描述，明确要点更能指导一致分析。</td></tr>
+          <tr><td>示例与检索提示</td><td>示例帮助理解标准，检索提示帮助定位相关条款。它们只是辅助材料，不能用「未搜到关键词」代替全文阅读和缺失判断。</td></tr>
+          <tr><td>启用 / 停用</td><td>方案须启用才可使用；方案内启用项进入完整审查范围，停用项不要求逐项覆盖。停用不会消除合同中的事实，也不代表合同没有这类风险。</td></tr>
+          <tr><td>复制、导入与版本</td><td>可复制公开方案作个人调整、导入或导出 JSON，并载入历史版本后保存。公开示例由平台管理员维护；个人方案按账号独立使用，其他用户无法读取。</td></tr>
+        </tbody></table>
+        <div class="example-box"><div class="example-header"><span>同一份条款，设置会怎样影响审查？</span><small>交互示例 · 不保存任何配置</small></div><div class="example-content"><p class="example-quote">「验收并收到合规发票后，90 日内付款。」</p><p>假设我方为乙方，付款期限风险点适用，全文未发现改变期限的其他约定。</p><div class="scenario-controls" role="group" aria-label="选择风险设置示例"><button type="button" data-scenario="strict" aria-pressed="true">基线 ≤ 60 日</button><button type="button" data-scenario="relaxed" aria-pressed="false">基线 ≤ 90 日</button><button type="button" data-scenario="disabled" aria-pressed="false">停用该风险点</button></div><div class="example-result" aria-live="polite" aria-atomic="true"><span class="result-label" id="example-label">示例结论 · 命中</span><h4 id="example-title">90 日超过 60 日基线</h4><p id="example-description">Agent 应指出付款期限偏离公司基线，引用原文并提出调整建议。实际分析还需要检查起算条件、例外和其他条款的影响。</p></div><p class="example-disclaimer">这些天数仅为演示用的公司偏好，不是法律标准。本示例展示配置含义，不运行模型；实际结论取决于原文、完整规则和 Agent 分析。</p><noscript><p class="example-disclaimer">启用 JavaScript 可切换示例：基线改为 90 日时，该期限本身未超基线；停用后，该项不进入要求逐项覆盖的清单。</p></noscript></div></div>
+        <h3>检查过、命中与信息不足，要分开看。</h3><p>「已检查 27 项」表示覆盖了 27 个风险点，不是发现 27 个风险。命中需要依据；未命中表示未发现偏离；信息不足表示材料不能支持完整判断；不适用单独呈现原因。</p>
+        <div class="flow-note"><p><strong>何时生效：</strong>保存方案后，后续执行读取所选方案的新版本，并保存当次配置快照。历史报告保持原结论；要用新标准评估旧合同，需要重新发起审查。</p></div>
+      </section>
+
+      <section class="guide-section" id="models"><p class="eyebrow">04 / MODEL CONNECTIONS</p><div class="section-title-row"><h2>模型与服务</h2><a href="/model">接入模型 ↗</a></div><p>个人用户可使用平台赠送额度，也可配置自己的供应商、API 密钥和模型。demo 用户仅使用平台试用模型，注册后可配置自己的模型。接入后，再在通用设置或对话中选择实际使用的模型。</p>
+        <table class="settings-table"><thead><tr><th scope="col">设置项</th><th scope="col">用途与实际影响</th></tr></thead><tbody>
+          <tr><td>接入预设、服务地址</td><td>预设帮助填写服务信息；服务地址决定请求发往哪里，需要与所用 API 产品和凭据一致。</td></tr>
+          <tr><td>供应商名称与标识</td><td>名称方便辨认，标识用于区分接入配置。修改名称不改变模型能力。</td></tr>
+          <tr><td>API 密钥</td><td>用于向模型服务认证。已配置时留空保留；选择清除密钥会停用该供应商。页面不返回已保存密钥的明文。</td></tr>
+          <tr><td>模型 ID 与显示名称</td><td>ID 必须是服务实际支持的模型，显示名称用于列表展示。可以获取模型列表后添加，也可手动填写。</td></tr>
+          <tr><td>上下文上限</td><td>声明模型可处理的上下文容量，参与运行时上下文管理。应按服务真实能力填写，调大数值不会让模型获得更长上下文。</td></tr>
+          <tr><td>输出上限</td><td>限制单次生成预算。过低可能导致长报告截断，部分模型的思考也会占用输出预算；数值应符合服务规格。</td></tr>
+          <tr><td>启用、测试与应用</td><td>供应商和模型均启用后才提供选择。「测试连接」验证接入可用性；「保存并应用」写入运行环境。运行中可能等待任务结束，以生效状态为准。</td></tr>
+        </tbody></table><p>切换模型可能改变理解、推理、速度和用量，但不会自动改变风险库的公司基线。连接测试成功也不等于合同审查质量已经验证。</p>
+      </section>
+
+      <section class="guide-section" id="traces"><p class="eyebrow">05 / EXECUTION HISTORY</p><div class="section-title-row"><h2>执行记录</h2><a href="/traces">查看执行记录 ↗</a></div><p>按合同、对话与轮次查看执行过程、工具动作和当次配置快照。需要核对结果使用了哪个模型、哪些 Skills 或哪版风险方案时，从这里查起。</p><table class="settings-table"><thead><tr><th scope="col">查看项</th><th scope="col">用途与实际影响</th></tr></thead><tbody><tr><td>范围与搜索</td><td>筛选当前、已归档、最近删除或全部对话，定位需要回看的执行。只改变查看范围，不影响 Agent 行为。</td></tr><tr><td>工具与状态</td><td>了解读取、写入、保存及错误信息，帮助定位任务停在哪里。过程状态应结合实际结果与保存回执理解。</td></tr><tr><td>配置快照</td><td>记录当次使用的设置、模型、Skill 版本和风险方案，便于核对结果来源。执行记录按本人账号隔离。</td></tr><tr><td>环境与管理记录</td><td>环境日志帮助排查云端运行环境启动等问题；管理员还可查看管理操作记录。读取记录不会主动唤醒环境。</td></tr></tbody></table></section>
+
+      <section class="guide-section" id="accounts"><p class="eyebrow">06 / YOUR ACCOUNT</p><div class="section-title-row"><h2>账号与免登录试用</h2><a href="/demo">查看示例 ↗</a></div><p>个人用户通过 GitHub、Google 或邮箱和密码登录。首次注册即可进入，每个账号拥有独立的文档、会话、模型和配置，注册不会获得管理员权限。</p><table class="settings-table"><thead><tr><th scope="col">使用方式</th><th scope="col">规则与资料归属</th></tr></thead><tbody><tr><td>公开示例</td><td>打开 /demo 即进入自己的试用空间，载入《OpenHarvey 虚构采购服务合同》。本地示例采用 TXT 格式，打开原文不扣请求次数，也不占自己的上传名额；提问后由助手实际生成回答和成果。</td></tr><tr><td>免登录 demo</td><td>首次领取起保留 24 小时，最多新建 3 个会话、发起 10 次请求，最多上传 2 份文件，每份不超过 10 MB。删除不恢复名额；到期停止任务并清理临时资料。</td></tr><tr><td>注册与保留</td><td>在 demo 身份下注册新账号，可保留资料和称呼。登录已有账号会进入已有账号，不自动合并 demo 文件。注册赠送共 20 次平台请求，扣除同一 demo 身份已用次数。</td></tr><tr><td>运行限制</td><td>初始每位用户最多同时运行 2 个任务，每日最多 20 次运行；平台试用每天最多接受 100 次，全站同时运行 2 个试用任务，单次最多 10 分钟。达到并发限制时排队。自配模型仍受沙箱资源限制。</td></tr></tbody></table><p>上述额度为首版默认值，当前剩余额度以工作台显示为准。公开风险库只包含付款、验收、违约责任、解除条件四个通用示例，数据为虚构演示标准。</p></section>
+
+      <section class="guide-section" id="members"><p class="eyebrow">07 / PLATFORM ADMINISTRATION</p><div class="section-title-row"><h2>平台管理 <span class="scope-label">管理员</span></h2><a href="/members">管理用户 ↗</a></div><p>平台管理员维护公开示例、用户启停及试用额度。个人用户和 demo 用户只能访问自己的内容与公开示例，无法读取管理员的私有合同、公司风险库或模型配置。</p><table class="settings-table"><thead><tr><th scope="col">管理项</th><th scope="col">实际影响</th></tr></thead><tbody><tr><td>启用 / 停用用户</td><td>停用会撤销登录及平台调用凭据，并停止正在运行的试用任务。</td></tr><tr><td>增加额度</td><td>为指定用户增加平台模型请求额度，已使用记录保持不变。</td></tr><tr><td>试用限制</td><td>调整默认赠送额度、上传、运行时长和全站资源上限。已有账号的总额度通过用户额度单独调整。</td></tr><tr><td>公开示例</td><td>明确选择公开范围后才供其他用户使用。旧的组织配置保留为管理员私有，不自动公开。</td></tr></tbody></table></section>
+
+      <section class="guide-section" id="faq"><p class="eyebrow">A FEW THINGS TO KNOW</p><h2>常见问题</h2>
+        <details><summary>第一次使用，需要先配好所有设置吗？</summary><p>可以直接浏览公开示例，或领取 demo 上传自己的文档；注册后也可使用平台赠送额度。开始任务前确认我方立场和所用风险方案即可。优先使用内置 Skills；有稳定的重复任务后，再增加个人指引。</p></details>
+        <details><summary>把所有 Skills 都启用，审查就会更全面吗？</summary><p>启用只表示可供选择，Agent 会按任务需要加载。完整公司审查的覆盖范围主要由当前风险方案的启用项决定。用途清晰、边界明确的 Skills 更便于正确选择；多个 Skill 的要求也应避免相互冲突。</p></details>
+        <details><summary>风险点没有启用，Agent 就完全不会提到它吗？</summary><p>它不进入本次完整审查要求逐项覆盖的清单。但 Agent 仍可能在普通对话或其他任务中根据原文提到相关问题；停用不是禁止模型讨论，也不是确认风险不存在。</p></details>
+        <details><summary>点击「接受风险」或「判断有误」，会自动修改风险库吗？</summary><p>不会。风险处理意见保存为业务反馈与历史记录，不改写原审查结论，也不自动训练模型或修改风险库。需要改变标准时，应调整相应风险方案，再重新审查。</p></details>
+        <details><summary>常规或全权执行，会跳过风险检查吗？</summary><p>不会。「常规 / 谨慎 / 全权」控制文件写入、保存或额外命令等操作是否需要许可，不控制风险标准或审查深度。完整审查仍按相应 Skill 和启用风险项执行。</p></details>
+        <details><summary>设置已保存，为什么结果没有立刻变化？</summary><p>检查是否有对话单独选择的模型、执行方式或风险方案，再查看配置的环境生效状态。正在运行的任务不会被中途替换配置，历史结果不会自动重算；需要时在新配置生效后重新发起任务。</p></details>
+        <details><summary>覆盖校验通过，是否意味着不会漏掉风险？</summary><p>覆盖、引用与保存校验核对的是检查项是否齐全、依据能否定位以及文件是否保存。适用性、条款理解和风险判断仍由 Agent 完成，不能据此保证语义正确或识别所有风险。可以回到原文核对并继续追问。</p></details>
+      </section>
+    </div>
+  </div>
+  <section class="closing guide-bottom"><div><p class="eyebrow">PUT IT INTO PRACTICE</p><h2>从你的下一次合同审查开始。</h2><p>选好方法，确认标准，把原文交给 Agent。</p></div><a class="button" href="/spaces">进入工作台 ↗</a></section>
+</main>
+<footer class="container site-footer"><span>合同工作台 <small>CONTRACT WORKBENCH</small></span><nav aria-label="页脚导航"><a href="/landing">产品介绍</a><a href="#main">返回顶部 ↑</a></nav></footer>
+</body></html>

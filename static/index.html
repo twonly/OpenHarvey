@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>合同工作台</title>
+<link rel="icon" href="/static/brand/agent-logo-v1.png">
+<link rel="stylesheet" href="/static/workbench.css">
+<link rel="stylesheet" href="/static/app.css?v=20260912-21">
+<link rel="stylesheet" href="/static/risk-ui.css?v=20260911-10">
+<link rel="stylesheet" href="/static/agent-ui.css?v=20260913-2">
+<link rel="stylesheet" href="/static/settings-ui.css?v=20260912-7">
+<link rel="stylesheet" href="/static/account-ui.css?v=20260913-header-2">
+</head>
+<body data-auth="loading">
+<div id="authLoading" class="auth-loading" role="status"><p id="authLoadingText">正在打开工作台…</p><button id="authRetry" hidden>重新连接</button></div>
+<div id="loginView" class="login-view" hidden>
+  <form id="loginForm" class="login-card">
+    <img src="/static/brand/agent-logo-v1.png" width="44" height="44" alt="">
+    <h1>合同工作台</h1><p>登录后，继续阅读和审查你的合同。</p>
+    <label>账号<input name="username" autocomplete="username" required></label>
+    <label>密码<input name="password" type="password" autocomplete="current-password" required></label>
+    <p id="loginError" role="alert"></p><button type="submit" class="primary">登录</button>
+    <small>账号由管理员创建。合同与对话仅本人可见。</small>
+  </form>
+</div>
+<header>
+  <div class="brand-lockup"><img src="/static/brand/agent-logo-v1.png" width="28" height="28" alt=""><h1>合同工作台</h1></div>
+  <details id="workspaceSwitcher" class="workspace-switcher"><summary><span>我的合同</span><b id="fname">选择合同</b><span aria-hidden="true">⌄</span></summary><div class="workspace-menu"><label class="workspace-search"><span>切换合同</span><input id="workspaceSearch" placeholder="搜索合同…" aria-label="搜索我的合同" autocomplete="off"></label><div id="workspaceList"></div><button id="uploadButton" class="new-contract">＋ 上传新合同</button></div></details>
+  <a href="/spaces" id="spacesLink" class="shell-toggle">合同空间</a>
+  <nav><span id="username"></span><button id="openSettings" class="shell-toggle">设置</button><button id="logout" class="shell-toggle">退出</button></nav>
+  <button id="toggleRail" class="shell-toggle panel-toggle" aria-controls="workspaceRail" aria-expanded="true"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M8 4v16"/><path class="panel-arrow" d="m15 9-3 3 3 3"/></svg><span>工作区</span></button>
+  <button id="toggleContext" class="shell-toggle panel-toggle" aria-controls="contextPane" aria-expanded="true"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M16 4v16"/><path class="panel-arrow" d="m9 9 3 3-3 3"/></svg><span>原文与产出物</span></button>
+</header>
+<dialog id="renameThreadDialog"><form method="dialog"><h3>重命名对话</h3><input id="renameThreadInput" aria-label="对话名称" required maxlength="120"><div class="dialog-actions"><button value="cancel" formnovalidate>取消</button><button value="save">保存</button></div></form></dialog>
+<div id="notice" role="status" hidden></div>
+<div id="appShell">
+  <aside id="workspaceRail" aria-label="合同工作区与对话列表">
+    <div class="rail-head"><div class="rail-kicker">当前合同工作区</div><h2 id="workspaceName">选择一份合同</h2><p>围绕这份合同，集中阅读与协作</p></div>
+    <div class="rail-scroll">
+      
+      <section class="rail-section"><div class="rail-section-head"><select id="threadScope" aria-label="对话范围"><option value="active">当前对话</option><option value="archived">已归档</option><option value="deleted">最近删除</option></select><button id="newThread" aria-label="新建对话" disabled>＋</button></div><div id="threadList"></div></section>
+      <section class="rail-section"><div class="rail-section-head"><span>附件 <small id="attachmentCount">0</small></span><button id="railAttachButton" aria-label="上传当前对话附件" disabled>＋</button></div><p class="rail-caption">仅用于当前对话</p><div id="attachmentList"></div></section>
+      <section class="rail-section"><div class="rail-section-head">产出物</div><div id="workspaceArtifacts"></div></section>
+    </div>
+  </aside>
+  <main>
+    <section id="chatPane">
+      <div class="pane-title"><b id="threadTitle">开始一份合同</b><span id="runStatus" role="status"></span></div>
+      <div id="msgs"><div id="messageHistory"><div class="welcome"><h2>先读懂合同，再作判断。</h2><p>上传文件后，可以直接询问条款，也可以生成完整摘要或风险审查报告。</p><p class="muted">支持 Word、文字版 PDF、Markdown 和 TXT</p></div></div></div>
+      <div id="threadReadOnly" hidden><span></span><button id="restoreCurrentThread">恢复对话</button></div><div id="pendingRequests"></div><div id="todos" hidden></div>
+      <div id="messageQueue" class="message-queue" hidden aria-label="待发送消息"></div>
+      <div id="composer">
+        <div id="generationStatus" role="status" hidden>正在生成<span aria-hidden="true">…</span></div>
+        <div id="savedDrafts" class="saved-drafts" hidden></div>
+        
+        <div id="sourceQuoteTray"></div>
+        <div class="composer-options"><div class="quick-actions" id="skillActions" aria-label="可用 Skills"></div><label class="risk-scheme-picker"><span>审查方案</span><select id="riskSchemeSelect" aria-label="本次审查方案" disabled></select></label></div>
+        <div class="prompt-card"><div id="skillPicker" role="listbox" aria-label="选择 Skill" hidden></div><div id="selectedSkill" hidden></div><textarea id="input" aria-label="合同问题或任务指令" aria-controls="skillPicker" aria-expanded="false" rows="3" placeholder="询问条款、圈选原文提问，或输入 / 选择 Skill…" disabled></textarea>
+          <div class="prompt-actions"><button id="attachButton" class="shell-toggle" disabled>＋ 附件</button><label class="model-picker"><span>模型</span><select id="modelSelect" aria-label="选择对话模型" title="用于下一条消息，选择仅为当前对话保存" disabled></select></label><label class="permission-picker"><select id="permissionMode" aria-label="执行权限模式" title="全权执行：当前合同空间的云端沙箱内自动执行工具操作；常规执行：额外命令需确认；谨慎执行：写入和命令需确认。选择会记入账号默认设置，新会话继承。" disabled><option value="full">全权执行</option><option value="auto">常规执行</option><option value="cautious">谨慎执行</option></select><span id="permissionLoading" class="permission-loading" role="status" aria-label="正在更新执行权限" hidden></span></label><button id="stopButton" type="button" title="取消当前任务，并暂停后续排队消息" hidden><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="5" y="5" width="14" height="14" rx="2"/></svg><span>取消任务</span></button><button id="sendBtn" type="button" aria-label="发送给 Agent" disabled><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></svg><span id="sendLabel" hidden>排队</span></button></div>
+        </div><span class="prompt-hint">Enter 发送 · Shift+Enter 换行 · 可在对话中指定我方立场</span>
+      </div>
+    </section>
+    <div class="vsplit" id="splitL" role="separator" tabindex="0" aria-label="调整对话宽度"></div>
+    <section id="contextPane" data-layout="stacked">
+      <section id="docPane">
+        <div id="documentToolbar">
+          <div class="document-picker"><span id="documentTitle">选择文档</span><select id="documentSelect" aria-label="选择当前对话材料" hidden></select></div>
+          <div class="document-actions">
+            <div class="source-mode" role="group" aria-label="文档显示方式"><button id="viewOriginal" aria-pressed="true">原件</button><button id="viewText" aria-pressed="false">文本</button></div>
+            <button id="sourceOutlineToggle" type="button" aria-expanded="false" aria-controls="sourceOutline" disabled>☷ 目录</button>
+            <button id="sourceSearchToggle" type="button" aria-expanded="false" aria-controls="sourceTools" title="搜索当前文档（⌘ / Ctrl + F）" disabled>搜索</button>
+            <details id="documentMore" class="document-more"><summary aria-label="更多文档操作" title="更多文档操作">⋯</summary><div class="document-more-menu"><button data-layout="compare" aria-pressed="false">对照审阅</button><a id="originalLink" hidden>下载原件</a></div></details>
+            <button class="shell-toggle pane-expand" data-layout="source" aria-label="放大合同文档" title="放大合同文档" aria-pressed="false"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5"/></svg></button>
+          </div>
+        </div>
+        <div id="sourceTools" role="search" aria-label="当前文档搜索" hidden>
+          <div class="source-search-field"><input id="sourceSearch" type="search" placeholder="搜索当前文档" aria-label="搜索当前文档" maxlength="200" autocomplete="off" disabled><button id="sourceSearchClear" type="button" aria-label="清除文档搜索" title="清除搜索" hidden>×</button></div>
+          <span id="sourceSearchCount" role="status" aria-live="polite"></span><button id="sourceSearchPrev" type="button" aria-label="上一处匹配" title="上一处（Shift + Enter）" disabled>↑</button><button id="sourceSearchNext" type="button" aria-label="下一处匹配" title="下一处（Enter）" disabled>↓</button><button id="sourceSearchClose" type="button" aria-label="收起文档搜索" title="收起搜索">×</button>
+        </div>
+<div id="sourceNavigationStatus" role="status" hidden></div>
+      <div id="sourceReader"><nav id="sourceOutline" aria-label="文档目录" hidden><div class="outline-title"><b>文档目录</b><button id="sourceOutlineClose" type="button" aria-label="收起文档目录">×</button></div><div id="sourceOutlineBody"></div></nav><div id="sourceContent" tabindex="0" aria-label="合同原文"><p class="placeholder">上传合同后，在此阅读原文。</p></div></div></section>
+      <div id="contextSplit" role="separator" tabindex="0" aria-label="调整原文和产出物大小" aria-orientation="horizontal"></div>
+      <section id="artPane">
+        <div id="artifactToolbar">
+          <span id="artifactTitle">产出物</span>
+          <div id="artifactStrip"><button id="artifactPrev" class="artifact-scroll" aria-label="向左滚动产出物" hidden>‹</button><div id="artifactTabs" aria-label="已保存的产出物"></div><button id="artifactNext" class="artifact-scroll" aria-label="向右滚动产出物" hidden>›</button></div>
+          <div class="artifact-picker" title="查看全部产出物"><span aria-hidden="true">⌄</span><select id="artifactSelect" aria-label="选择产出物" hidden></select></div>
+          <div class="artifact-actions">
+            <details id="artifactMore" class="document-more"><summary aria-label="更多产出物操作" title="更多产出物操作">⋯</summary><div class="document-more-menu"><div id="artifactInfo" hidden></div><button data-layout="compare" aria-pressed="false">对照审阅</button><button id="compareArtifacts" disabled>两份对照</button><div id="artifactDownloads"></div></div></details>
+            <button class="shell-toggle pane-expand" data-layout="artifact" aria-label="放大产出物" title="放大产出物" aria-pressed="false"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5"/></svg></button>
+          </div>
+        </div>
+        <div id="artifactPair"><div class="artifact-column"><div id="primaryCompareTitle" class="artifact-caption" hidden></div><div id="artBody"><p class="placeholder">摘要、报告及其他文件保存后会出现在这里。</p></div></div><div id="compareColumn" class="artifact-column" hidden><div class="artifact-caption"><select id="compareSelect" aria-label="选择对照产出物"></select><button id="closeArtifactComparison" aria-label="结束两份对照" title="结束两份对照">×</button></div><div id="compareBody"></div></div></div>
+      </section>
+    </section>
+  </main>
+</div>
+<input type="file" id="uploadInput" accept=".docx,.pdf,.md,.txt" hidden>
+<dialog id="deleteThreadDialog"><form method="dialog"><h3>删除这段对话？</h3><p>对话将移入“最近删除”，可随时恢复。附件、产出物和执行记录会保留。</p><div><button value="cancel">取消</button><button value="delete" class="confirm-delete">移入最近删除</button></div></form></dialog>
+<input type="file" id="attachmentInput" accept=".docx,.pdf,.md,.txt" hidden>
+<div id="sourceSelectionToolbar" hidden><button id="addSourceQuote">引用原文到对话 ↵</button></div>
+<script src="/static/vendor/jszip-3.10.1.min.js"></script>
+<script src="/static/vendor/docx-preview-0.3.6.min.js"></script>
+<script type="module" src="/static/app.js?v=20260913-header-2"></script>
+</body>
+</html>

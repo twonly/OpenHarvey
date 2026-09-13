@@ -1,0 +1,16 @@
+{
+  "model": "company/your-model-id",
+  "small_model": "company/your-model-id",
+  "enabled_providers": ["company"],
+  "provider": {
+    "company": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "公司模型",
+      "options": {
+        "baseURL": "https://your-provider.example/v1",
+        "apiKey": "{env:CW_MODEL_API_KEY}"
+      },
+      "models": {"your-model-id": {"name": "公司模型", "limit": {"context": 128000, "output": 16000}}}
+    }
+  }
+}

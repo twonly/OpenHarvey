@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>合同空间 · 合同工作台</title>
+<link rel="icon" href="/static/brand/agent-logo-v1.png">
+<link rel="stylesheet" href="/static/spaces.css?v=20260912-1">
+<link rel="stylesheet" href="/static/account-ui.css?v=20260913-header-2">
+</head>
+<body data-auth="loading">
+<div id="authLoading" class="auth-loading" role="status">正在打开合同空间…</div>
+<section id="loginView" class="login-view" hidden>
+  <form id="loginForm" class="login-card">
+    <img src="/static/brand/agent-logo-v1.png" width="46" height="46" alt="">
+    <p class="eyebrow">CONTRACT WORKBENCH</p><h1>回到你的合同空间</h1><p>合同、对话与产出物仅本人可见。</p>
+    <label>账号<input name="username" autocomplete="username" required></label>
+    <label>密码<input name="password" type="password" autocomplete="current-password" required></label>
+    <p id="loginError" role="alert"></p><button type="submit" class="primary">登录</button>
+  </form>
+</section>
+<div id="spacesApp" hidden>
+  <header class="topbar">
+    <a href="/spaces" class="brand"><img src="/static/brand/agent-logo-v1.png" width="30" height="30" alt=""><span><b>合同工作台</b><small>CONTRACT WORKBENCH</small></span></a>
+    <nav><a href="/spaces" aria-current="page">合同空间</a><a href="/landing" target="_blank" rel="noopener">产品介绍 ↗</a><a href="/config">设置</a><span id="username"></span><button id="logout">退出</button></nav>
+  </header>
+  <main>
+    <section class="hero">
+      <div><p class="eyebrow">CONTRACT ARCHIVE</p><h1>合同空间</h1><p>从一份合同出发，回到相关对话、材料与已保存成果。</p></div>
+      <button id="uploadButton" class="upload-button"><span>＋</span> 上传新合同</button>
+    </section>
+    <section id="summary" class="summary" aria-label="合同空间概览"></section>
+    <section class="workspace-card">
+      <div class="toolbar">
+        <div class="scope-tabs" role="tablist" aria-label="合同范围">
+          <button data-scope="active" aria-selected="true">全部合同 <span id="activeCount">0</span></button>
+          <button data-scope="starred" aria-selected="false">重点关注 <span id="starredCount">0</span></button>
+          <button data-scope="deleted" aria-selected="false">最近删除 <span id="deletedCount">0</span></button>
+        </div>
+        <label class="search"><span aria-hidden="true">⌕</span><input id="searchInput" type="search" placeholder="搜索合同名称" aria-label="搜索合同名称" autocomplete="off"></label>
+        <label class="sort"><span>排序</span><select id="sortSelect"><option value="updated">重点与最近更新</option><option value="created">创建时间</option><option value="name">合同名称</option></select></label>
+      </div>
+      <div class="list-head" aria-hidden="true"><span>合同</span><span>会话</span><span>产出物</span><span>创建日期</span><span>最近更新</span><span>操作</span></div>
+      <div id="spaceList" aria-live="polite"></div>
+    </section>
+    <p class="retention-note">最近删除中的合同仍保留原文件、对话与产出物，可恢复或永久删除。</p>
+  </main>
+</div>
+<input type="file" id="uploadInput" accept=".docx,.pdf,.md,.txt" hidden>
+<dialog id="confirmDialog"><form method="dialog"><div class="danger-mark">!</div><h2 id="confirmHeading"></h2><p id="confirmCopy"></p><div class="dialog-actions"><button value="cancel">取消</button><button value="confirm" class="danger" id="confirmAction">确认</button></div></form></dialog>
+<dialog id="renameDialog"><form method="dialog"><p class="eyebrow">SPACE NAME</p><h2>重命名合同空间</h2><label>空间名称<input id="renameInput" maxlength="120" required></label><div class="dialog-actions"><button value="cancel">取消</button><button value="save" class="primary">保存</button></div></form></dialog>
+<div id="notice" role="status" hidden></div>
+<script type="module" src="/static/spaces.js?v=20260913-header-2"></script>
+</body>
+</html>

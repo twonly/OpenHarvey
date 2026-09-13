@@ -1,0 +1,11 @@
+OpenHarvey
+Copyright 2026 Yu Yu and OpenHarvey contributors
+Application code: AGPL-3.0-only, except third-party components with their own notices.
+
+OpenHarvey is independent of Harvey AI Corp. No endorsement, sponsorship, authorization, feature parity or API compatibility is implied.
+
+OpenCode, E2B and Supabase are independent projects/services. Their names identify integrations; their code, hosted services, models, licenses and trademarks remain subject to their respective terms.
+
+Third-party browser libraries, if included under static/vendor, retain their original notices and licenses. Python dependencies retain their upstream licenses. Installing this application does not relicense those components or grant rights to model weights or private datasets.
+
+All bundled sample contract and risk values are fictional examples, not any organization's internal policy or legal advice.

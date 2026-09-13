@@ -1,0 +1,11 @@
+.git
+.venv
+**/__pycache__
+**/*.pyc
+node_modules
+data
+output
+.env*
+deploy/generated
+tests
+.vercel
