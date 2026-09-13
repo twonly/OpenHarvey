@@ -34,6 +34,10 @@ class WebsiteExportTests(unittest.TestCase):
                 for link in ('/demo','/spaces','/guide'):
                     self.assertIn('href="'+link+'"',body)
             self.assertTrue(json.loads((dest/'vercel.json').read_text())['rewrites'])
+            for path in ('features.html','en/features.html','static/showcase.css'):
+                self.assertTrue((dest/path).is_file(),path)
+            for path in (root/'static/product').glob('*.png'):
+                self.assertEqual((dest/'static/product'/path.name).read_bytes(),path.read_bytes())
 
     def test_upstream_requires_bare_https_origin(self):
         for origin in ('http://backend.example.com','https://name:secret@backend.example.com','https://backend.example.com/path','https://backend.example.com?x=1'):

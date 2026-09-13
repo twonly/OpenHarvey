@@ -27,6 +27,17 @@ class PublicPageTests(unittest.TestCase):
         self.assertIn('id="spacesApp"', self.client.get('/spaces').text)
         self.assertEqual(self.client.get('/api/me').status_code, 401)
 
+    def test_guide_includes_all_five_product_screenshots(self):
+        from contract_web.product_showcase import FEATURES
+        body=self.client.get('/guide').text
+        self.assertIn('id="highlights"',body)
+        for feature in FEATURES:
+            path='/static/product/'+feature['image']
+            self.assertIn(path,body)
+            response=self.client.get(path)
+            self.assertEqual(response.status_code,200)
+            self.assertEqual(response.headers['content-type'],'image/png')
+
     @patch.dict(os.environ, {'CW_PUBLIC_ORIGIN': 'https://agent.tokrace.com',
                             'CW_ADDITIONAL_ORIGINS': 'https://web-production-991ee.up.railway.app'})
     def test_primary_and_explicit_legacy_origin_reach_authentication(self):

@@ -17,6 +17,48 @@ OpenHarvey connects source documents, conversations and saved deliverables. It i
 
 The website supports Chinese and English. **The application UI, built-in examples and some report fields are primarily Chinese in v0.1.0.** Full English UI and English-contract evaluation are on the roadmap.
 
+## Five product highlights
+
+**See the evidence. Deliver the work.** [Explore the product with full-size screenshots](https://openharvey.com/en/features). The screenshots below show the Chinese workspace; account identifiers are masked in the supplied images.
+
+### 1. Compare findings with highlighted source evidence
+
+Read answers, reports and source documents side by side. Follow valid citations to the relevant page and continuous passages, with highlighted clauses for direct verification. Move from “What does it say?” to “Where does it say that?”
+
+![An answer linked to highlighted clauses in the original PDF](static/product/source-traceability.png)
+
+### 2. Deliver the format your task needs
+
+Go beyond fixed report templates: ask for project kickoff materials, risk review reports, summaries, clause comparisons, HTML dashboards or structured lists. Saved outputs appear in the deliverables pane for supported-format previews and download—not token-by-token rendering of every file type.
+
+Example prompt: **“Create an HTML project kickoff briefing from this tender. Focus on customer needs, delivery scope, acceptance conditions and open questions. Keep source citations.”**
+
+![An HTML kickoff briefing displayed in the deliverables pane with source citations](static/product/deliverable-preview.png)
+
+### 3. Your risk checklist and your perspective
+
+Start with four illustrative checks covering payment, acceptance, liability and termination. Copy a playbook into your account, customize checks and baselines, and set your perspective as Party A, Party B, buyer or supplier.
+
+Example prompt: **“We are the supplier. Review this contract against my selected playbook, with source evidence, risk explanations and proposed revisions for each finding.”**
+
+![Public risk examples and configurable personal playbooks](static/product/risk-playbooks.png)
+
+### 4. Three core Skills, with room for your own
+
+Built-in Skills cover **contract summaries, contract risk review and clause revision**. Copy, edit or add personal Skills to turn recurring steps, references and delivery requirements into reusable agent instructions.
+
+![The three built-in Skills and personal Skill creation](static/product/custom-skills.png)
+
+### 5. Free trial + BYOK, without a single-model lock-in
+
+The hosted demo defaults to **10 task requests**. Registration raises the total allowance to **20**, including requests already used by the same demo identity—not an additional 20. These count task requests, not internal model calls. Current balances and limits are shown in the workspace.
+
+**Bring your own API key**, endpoint and model IDs for OpenAI-compatible services, or connect OrcaRouter. Compatibility and tool-calling support determine which models work; provider charges and sandbox limits still apply.
+
+![BYOK provider configuration, OrcaRouter and multiple model choices](static/product/byok-models.png)
+
+These owner-supplied screenshots illustrate the interface, not independently verified review results or proof that a displayed task fully completed. The underlying business documents and account data are not distributed. Sample risk baselines are fictional examples, not universal legal standards. English prompts here illustrate task intent; full English-task evaluation remains on the roadmap.
+
 ## Quick start: local development
 
 Requirements: Python 3.12, Node.js 22 and OpenCode 1.16.2. Local process mode is for a trusted single-user machine; it does not provide OS-level multi-user isolation.

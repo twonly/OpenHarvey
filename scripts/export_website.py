@@ -10,7 +10,7 @@ from contract_web.marketing import register_marketing
 
 ROOT = Path(__file__).resolve().parents[1]
 
-PUBLIC_PATHS = ['/', '/en'] + [p+'/'+s for s in ('security','open-source','harvey-alternative') for p in ('','/en')]
+PUBLIC_PATHS = ['/', '/en'] + [p+'/'+s for s in ('security','open-source','harvey-alternative','features') for p in ('','/en')]
 WORKBENCH_PATHS = ['/demo','/spaces','/guide','/login','/agent','/model','/config','/traces','/skills','/risks','/members','/organization','/health','/api/:path*','/auth/:path*','/orca/:path*','/static/:path*']
 
 def hosting_config(workbench_origin):
@@ -55,8 +55,9 @@ def main():
             body=response.text
             file.write_text(body,encoding='utf-8')
     (dest/'static/brand').mkdir(parents=True)
-    for name in ('openharvey.css','brand/openharvey.svg','brand/openharvey-social.png'):
+    for name in ('openharvey.css','showcase.css','brand/openharvey.svg','brand/openharvey-social.png'):
         if (ROOT/'static'/name).is_file():shutil.copy2(ROOT/'static'/name,dest/'static'/name)
+    shutil.copytree(ROOT/'static/product',dest/'static/product')
     (dest/'vercel.json').write_text(json.dumps(config,indent=2)+'\n')
     print(json.dumps({'destination':str(dest),'pages':len(paths)}))
 
