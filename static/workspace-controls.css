@@ -1,0 +1,31 @@
+/* Native dialogs and actions reuse the existing Beautiful UI surface tokens. */
+dialog:not(.workspace-tour){position:fixed;inset:0;margin:auto;box-sizing:border-box;width:min(440px,calc(100vw - 32px));max-height:calc(100dvh - 40px);overflow:auto;border:1px solid var(--line,#dce5df);border-radius:16px;background:var(--surface,var(--paper,#fff));color:var(--ink,#213d31);padding:26px;box-shadow:0 24px 90px #102b3033;font-family:"Avenir Next","PingFang SC",sans-serif}
+dialog:not(.workspace-tour)::backdrop{background:#102b3059;backdrop-filter:blur(3px)}
+dialog:not(.workspace-tour) form{padding:0}
+dialog:not(.workspace-tour) :is(h2,h3){margin:0 0 10px;font-size:19px;line-height:1.5}
+dialog:not(.workspace-tour) p{font-size:13px;line-height:1.8;color:var(--ink-2,#677c70);margin:10px 0 18px}
+dialog:not(.workspace-tour) input{box-sizing:border-box;width:100%;height:44px;border:1px solid var(--line-strong,#cbd9d0);background:var(--bg,#f8faf7);color:inherit;border-radius:8px;padding:0 12px;margin:8px 0;font:inherit}
+.dialog-actions{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:9px;margin-top:22px}
+.oh-button,.dialog-actions button,#deleteThreadDialog button{display:inline-flex;align-items:center;justify-content:center;gap:7px;min-height:38px;padding:8px 15px;border:1px solid var(--line,#dce5df);border-radius:8px;background:var(--surface,var(--paper,#fff));color:var(--ink,#213d31);font:600 12px/1.5 "Avenir Next","PingFang SC",sans-serif;cursor:pointer;text-decoration:none;transition:background .15s,border-color .15s}
+.oh-button:hover,.dialog-actions button:hover{background:var(--bui-hover,#f0f5ef);border-color:#9fb7a9}
+.oh-button.primary,.dialog-actions button[value=save]{background:#216b53!important;color:#fff!important;border-color:#216b53!important}
+.oh-button.primary:hover,.dialog-actions button[value=save]:hover{background:#175840!important}
+.oh-button:focus-visible,.dialog-actions button:focus-visible{outline:3px solid #9bc9ad;outline-offset:3px}
+#deleteThreadDialog .confirm-delete{color:#a74738;border-color:#e9cfc8;background:#fff8f5}
+#renameThreadDialog{margin:auto;width:min(440px,calc(100vw - 32px));padding:26px}
+.account-identity{display:inline-flex;align-items:center;gap:8px;min-width:0;max-width:230px;vertical-align:middle}
+.account-identity img{flex:none;padding:3px;border-radius:50%;background:#edf4ed;box-sizing:content-box}
+.account-identity>span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.settings-nav .account-identity{max-width:100%;margin-top:8px;font-size:11px}
+body>header #username{max-width:230px}body>header #username:has(.account-identity){overflow:visible}
+.usage-resource{color:#758b7c}.model-access-card{max-width:580px;margin:24px 0;padding:26px;border:1px solid var(--line,#dce5df);border-radius:14px;background:var(--surface,#fff)}
+.model-access-card h2{font-size:20px;margin:0 0 12px}.model-access-card p{line-height:1.85;color:var(--ink-2,#677c70);font-size:13px;margin:12px 0 20px}
+.pane-close{font-size:20px!important;line-height:1!important;min-width:28px}
+#contextPane[data-source-hidden=true]>#docPane,#contextPane[data-artifact-hidden=true]>#artPane{display:none!important}
+#contextPane[data-source-hidden=true]>#contextSplit,#contextPane[data-artifact-hidden=true]>#contextSplit{display:none!important}
+#contextPane[data-source-hidden=true]>#artPane,#contextPane[data-artifact-hidden=true]>#docPane{flex:1!important;height:auto!important}
+#contextPane[data-source-hidden=true],#contextPane[data-artifact-hidden=true]{display:flex!important;flex-direction:column!important}
+#toggleSource,#toggleArtifact{white-space:nowrap}
+main.context-closed #contextPane{display:none!important}
+@media(max-width:1100px){.account-identity{max-width:150px}.account-identity>span{max-width:110px}}
+@media(max-width:700px){header #username .account-identity>span{display:none}#toggleSource,#toggleArtifact{padding:5px 7px;font-size:11px}header .brand-lockup h1{display:none}}

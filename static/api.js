@@ -13,7 +13,7 @@ export async function api(path, {method='GET', body, headers={}, signal, timeout
     const data=await response.json().catch(()=>({}));
     if(response.status===401) document.dispatchEvent(new Event('session-expired'));
     const error=new Error(typeof data.detail==='string'?data.detail:`请求失败（${response.status}）`);
-    if(response.status===403&&/注册/.test(error.message))document.dispatchEvent(new CustomEvent('registration-required',{detail:error.message}));
+    if(method!=='GET'&&response.status===403&&/注册/.test(error.message))document.dispatchEvent(new CustomEvent('registration-required',{detail:error.message}));
     error.status=response.status;throw error;
   }
   if(response.status===204) return null;

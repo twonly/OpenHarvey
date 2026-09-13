@@ -1,3 +1,4 @@
+import {accountIdentityHTML} from './account-identity.js';
 import {renderUsers,orcaConnect} from './account-ui.js';
 import {skillEnvironmentsHTML} from './skill-environments.js?v=20260912-21';
 import {api} from './api.js';
@@ -18,7 +19,7 @@ export function setupSettings({notice,onClose}){
   const area=(label,name,value='',rows=4,extra='')=>`<label>${esc(label)}<textarea name="${name}" rows="${rows}" ${extra}>${esc(value??'')}</textarea></label>`;
   const select=(label,name,value,options)=>`<label>${esc(label)}<select name="${name}">${options.map(([v,l])=>`<option value="${esc(v)}" ${v===value?'selected':''}>${esc(l)}</option>`).join('')}</select></label>`;
   function shell(){
-    root.innerHTML=`<div class="settings-nav"><div class="settings-title"><b>设置</b><button data-close aria-label="返回工作台">×</button></div><nav aria-label="设置导航">${[['general','通用设置'],['skills','Skills'],['risks','风险库'],['traces','执行记录'],['providers','模型与服务'],...(identity.role==='admin'?[['members','用户管理']]:[])].map(([id,label])=>`<button data-tab="${id}" aria-current="${tab===id?'page':'false'}">${label}</button>`).join('')}</nav><p>${identity.account_kind==='demo'?'免登录体验':'我的账户'}<br><span>${esc(identity.username)} · ${identity.role==='admin'?'平台管理员':identity.account_kind==='demo'?'demo':'个人用户'}</span></p><a class="settings-guide-link" href="/guide" target="_blank" rel="noopener">设置指南 ↗</a><button data-close class="settings-back">← 返回工作台</button></div><div class="settings-content"><div id="settingsPage"></div></div>`;
+    root.innerHTML=`<div class="settings-nav"><div class="settings-title"><b>设置</b><button data-close aria-label="返回工作台">×</button></div><nav aria-label="设置导航">${[['general','通用设置'],['skills','Skills'],['risks','风险库'],['traces','执行记录'],['providers','模型与服务'],...(identity.role==='admin'?[['members','用户管理']]:[])].map(([id,label])=>`<button data-tab="${id}" aria-current="${tab===id?'page':'false'}">${label}</button>`).join('')}</nav><p>${identity.account_kind==='demo'?'免登录体验':'我的账户'}<br><span>${accountIdentityHTML(identity)} · ${identity.role==='admin'?'平台管理员':identity.account_kind==='demo'?'demo':'个人用户'}</span></p><a class="settings-guide-link" href="/guide" target="_blank" rel="noopener">设置指南 ↗</a><button data-close class="settings-back">← 返回工作台</button></div><div class="settings-content"><div id="settingsPage"></div></div>`;
     $('[aria-current="page"]').scrollIntoView({block:'nearest',inline:'nearest'});
   }
   function route(next,mode){if(mode!=='none'&&location.pathname!==settingsPaths[next])history[mode==='replace'?'replaceState':'pushState'](null,'',settingsPaths[next]);}
@@ -30,7 +31,7 @@ export function setupSettings({notice,onClose}){
     document.getElementById('workspaceSwitcher').open=false;
     document.getElementById('appShell').inert=true;
     root.hidden=false;tab=next;dirty=false;route(next,historyMode);
-    await render();
+    try{await render();}catch(error){$('#settingsPage').innerHTML='<p class="settings-empty" role="alert">'+esc(error.message)+'</p>';throw error;}
   }
   async function close({historyMode='push'}={}){
     if(!leave())return false;dirty=false;generation++;root.hidden=true;root.replaceChildren();document.getElementById('appShell').inert=false;
@@ -41,7 +42,7 @@ export function setupSettings({notice,onClose}){
   async function render(){
     const g=++generation;shell();$('#settingsPage').innerHTML='<p class="settings-empty">正在读取…</p>';
     if(tab==='members'){await renderUsers($('#settingsPage'),notice);return;}
-    if(tab==='providers'&&identity.account_kind==='demo'){orcaConnect($('#settingsPage'),identity);return;}
+    if(tab==='providers'&&identity.account_kind==='demo'){$('#settingsPage').replaceChildren();orcaConnect($('#settingsPage'),identity);return;}
     if(['providers','members'].includes(tab)){await renderAdmin($('#settingsPage'),{mode:tab,identity,notice,dirty:value=>dirty=value,leave});orcaConnect($('#settingsPage'),identity);return;}
     if(tab==='traces'){await renderTraces($('#settingsPage'),{identity,notice});return;}
     if(tab==='risks'){await renderRiskSettings($('#settingsPage'),{identity,notice,dirty:value=>dirty=value,leave});return;}

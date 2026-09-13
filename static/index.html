@@ -2,21 +2,22 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>合同工作台</title>
-<link rel="icon" href="/static/brand/agent-logo-v1.png">
+<title>OpenHarvey</title>
+<link rel="icon" href="/static/brand/openharvey.svg">
 <link rel="stylesheet" href="/static/workbench.css">
 <link rel="stylesheet" href="/static/app.css?v=20260912-21">
 <link rel="stylesheet" href="/static/risk-ui.css?v=20260911-10">
 <link rel="stylesheet" href="/static/agent-ui.css?v=20260913-2">
 <link rel="stylesheet" href="/static/settings-ui.css?v=20260912-7">
 <link rel="stylesheet" href="/static/account-ui.css?v=20260913-header-2">
+<link rel="stylesheet" href="/static/workspace-controls.css?v=20260913-4">
 </head>
 <body data-auth="loading">
 <div id="authLoading" class="auth-loading" role="status"><p id="authLoadingText">正在打开工作台…</p><button id="authRetry" hidden>重新连接</button></div>
 <div id="loginView" class="login-view" hidden>
   <form id="loginForm" class="login-card">
-    <img src="/static/brand/agent-logo-v1.png" width="44" height="44" alt="">
-    <h1>合同工作台</h1><p>登录后，继续阅读和审查你的合同。</p>
+    <img src="/static/brand/openharvey.svg" width="44" height="44" alt="">
+    <h1>OpenHarvey</h1><p>登录后，继续阅读和审查你的合同。</p>
     <label>账号<input name="username" autocomplete="username" required></label>
     <label>密码<input name="password" type="password" autocomplete="current-password" required></label>
     <p id="loginError" role="alert"></p><button type="submit" class="primary">登录</button>
@@ -24,14 +25,14 @@
   </form>
 </div>
 <header>
-  <div class="brand-lockup"><img src="/static/brand/agent-logo-v1.png" width="28" height="28" alt=""><h1>合同工作台</h1></div>
+  <div class="brand-lockup"><img src="/static/brand/openharvey.svg" width="28" height="28" alt=""><h1>OpenHarvey</h1></div>
   <details id="workspaceSwitcher" class="workspace-switcher"><summary><span>我的合同</span><b id="fname">选择合同</b><span aria-hidden="true">⌄</span></summary><div class="workspace-menu"><label class="workspace-search"><span>切换合同</span><input id="workspaceSearch" placeholder="搜索合同…" aria-label="搜索我的合同" autocomplete="off"></label><div id="workspaceList"></div><button id="uploadButton" class="new-contract">＋ 上传新合同</button></div></details>
   <a href="/spaces" id="spacesLink" class="shell-toggle">合同空间</a>
   <nav><span id="username"></span><button id="openSettings" class="shell-toggle">设置</button><button id="logout" class="shell-toggle">退出</button></nav>
   <button id="toggleRail" class="shell-toggle panel-toggle" aria-controls="workspaceRail" aria-expanded="true"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M8 4v16"/><path class="panel-arrow" d="m15 9-3 3 3 3"/></svg><span>工作区</span></button>
-  <button id="toggleContext" class="shell-toggle panel-toggle" aria-controls="contextPane" aria-expanded="true"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M16 4v16"/><path class="panel-arrow" d="m9 9 3 3-3 3"/></svg><span>原文与产出物</span></button>
+<button id="toggleSource" class="shell-toggle panel-toggle" aria-controls="docPane" aria-expanded="true">合同原文</button><button id="toggleArtifact" class="shell-toggle panel-toggle" aria-controls="artPane" aria-expanded="true">产出物</button>
 </header>
-<dialog id="renameThreadDialog"><form method="dialog"><h3>重命名对话</h3><input id="renameThreadInput" aria-label="对话名称" required maxlength="120"><div class="dialog-actions"><button value="cancel" formnovalidate>取消</button><button value="save">保存</button></div></form></dialog>
+<dialog id="renameThreadDialog"><form method="dialog"><h3>重命名对话</h3><input id="renameThreadInput" aria-label="对话名称" required maxlength="120"><div class="dialog-actions"><button value="cancel" formnovalidate>取消</button><button value="save">确认修改</button></div></form></dialog>
 <div id="notice" role="status" hidden></div>
 <div id="appShell">
   <aside id="workspaceRail" aria-label="合同工作区与对话列表">
@@ -65,7 +66,7 @@
       <section id="docPane">
         <div id="documentToolbar">
           <div class="document-picker"><span id="documentTitle">选择文档</span><select id="documentSelect" aria-label="选择当前对话材料" hidden></select></div>
-          <div class="document-actions">
+          <div class="document-actions"><button class="shell-toggle pane-close" data-close-pane="source" type="button" aria-label="隐藏合同原文" title="隐藏合同原文">×</button>
             <div class="source-mode" role="group" aria-label="文档显示方式"><button id="viewOriginal" aria-pressed="true">原件</button><button id="viewText" aria-pressed="false">文本</button></div>
             <button id="sourceOutlineToggle" type="button" aria-expanded="false" aria-controls="sourceOutline" disabled>☷ 目录</button>
             <button id="sourceSearchToggle" type="button" aria-expanded="false" aria-controls="sourceTools" title="搜索当前文档（⌘ / Ctrl + F）" disabled>搜索</button>
@@ -85,7 +86,7 @@
           <span id="artifactTitle">产出物</span>
           <div id="artifactStrip"><button id="artifactPrev" class="artifact-scroll" aria-label="向左滚动产出物" hidden>‹</button><div id="artifactTabs" aria-label="已保存的产出物"></div><button id="artifactNext" class="artifact-scroll" aria-label="向右滚动产出物" hidden>›</button></div>
           <div class="artifact-picker" title="查看全部产出物"><span aria-hidden="true">⌄</span><select id="artifactSelect" aria-label="选择产出物" hidden></select></div>
-          <div class="artifact-actions">
+          <div class="artifact-actions"><button class="shell-toggle pane-close" data-close-pane="artifact" type="button" aria-label="隐藏产出物" title="隐藏产出物">×</button>
             <details id="artifactMore" class="document-more"><summary aria-label="更多产出物操作" title="更多产出物操作">⋯</summary><div class="document-more-menu"><div id="artifactInfo" hidden></div><button data-layout="compare" aria-pressed="false">对照审阅</button><button id="compareArtifacts" disabled>两份对照</button><div id="artifactDownloads"></div></div></details>
             <button class="shell-toggle pane-expand" data-layout="artifact" aria-label="放大产出物" title="放大产出物" aria-pressed="false"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5"/></svg></button>
           </div>
@@ -96,7 +97,7 @@
   </main>
 </div>
 <input type="file" id="uploadInput" accept=".docx,.pdf,.md,.txt" hidden>
-<dialog id="deleteThreadDialog"><form method="dialog"><h3>删除这段对话？</h3><p>对话将移入“最近删除”，可随时恢复。附件、产出物和执行记录会保留。</p><div><button value="cancel">取消</button><button value="delete" class="confirm-delete">移入最近删除</button></div></form></dialog>
+<dialog id="deleteThreadDialog"><form method="dialog"><h3>删除这段对话？</h3><p>对话将移入“最近删除”，可随时恢复。附件、产出物和执行记录会保留。</p><div class="dialog-actions"><button value="cancel">取消</button><button value="delete" class="confirm-delete">移入最近删除</button></div></form></dialog>
 <input type="file" id="attachmentInput" accept=".docx,.pdf,.md,.txt" hidden>
 <div id="sourceSelectionToolbar" hidden><button id="addSourceQuote">引用原文到对话 ↵</button></div>
 <script src="/static/vendor/jszip-3.10.1.min.js"></script>

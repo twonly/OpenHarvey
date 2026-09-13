@@ -1,4 +1,5 @@
 import {setupAuth,exchangeCallback,accountReady} from './account-ui.js?v=20260913-header-2';
+import {accountIdentityHTML} from './account-identity.js';
 import {api,upload} from './api.js';
 import {filteredWorkspaces,workspaceRows} from './spaces-ui.js';
 
@@ -53,7 +54,7 @@ async function initialize(){
   await setupAuth();if(await exchangeCallback())return;
   document.body.dataset.auth='loading';$('authLoading').hidden=false;$('loginView').hidden=true;
   if(location.pathname==='/login'){loggedOut();return;}
-  try{const me=await api('/api/me');$('username').textContent=me.account_kind==='demo'?'':me.username;await load();document.body.dataset.auth='ready';$('authLoading').hidden=true;$('spacesApp').hidden=false;void accountReady(me);const message=new URLSearchParams(location.search).get('notice');if(message==='missing'){notice('该合同空间已删除、不存在，或不属于当前账号。');history.replaceState(null,'','/spaces');}}
+  try{const me=await api('/api/me');$('username').innerHTML=accountIdentityHTML(me);await load();document.body.dataset.auth='ready';$('authLoading').hidden=true;$('spacesApp').hidden=false;void accountReady(me);const message=new URLSearchParams(location.search).get('notice');if(message==='missing'){notice('该合同空间已删除、不存在，或不属于当前账号。');history.replaceState(null,'','/spaces');}}
   catch(error){if(error.status!==401){$('authLoading').textContent='暂时无法连接工作台';notice(error.message);}}
 }
 initialize();

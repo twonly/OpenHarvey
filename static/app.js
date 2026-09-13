@@ -1,4 +1,5 @@
 import {setupAuth,accountReady} from './account-ui.js?v=20260913-header-2';
+import {accountIdentityHTML} from './account-identity.js';
 import {previewCitation} from './preview-citations.js';
 import {threadScope,scopeLabels,threadListHTML} from './thread-ui.js?v=20260912-21';
 import {queueHTML,restoreDraft,reconcilePending,pendingRequest,preparationLabel,loadingStateHTML} from './message-queue.js?v=20260912-21';
@@ -14,6 +15,7 @@ import {setupReading,setupArtifactStrip,setupQuotes,pdfMarkup,fitPdfText} from '
 import {setupDocumentNavigation} from './document-navigation.js?v=20260911-18';
 
 const $=id=>document.getElementById(id);
+let identity=null;
 let workspace=null,tid=null,state={messages:[],status:{type:'idle'},documents:[]},selectedSkill=null;
 let stopStream=()=>{},epoch=0,renderTimer=null,source=null,sourceMode='original',artifactId=null;
 let restoring=false,restoreEpoch=0,buffer=[],sourceEpoch=0,sourceRenderEpoch=0,artifactEpoch=0;
@@ -30,6 +32,7 @@ const quotes=setupQuotes(()=>({source,tid}),()=>saveDraft(),notice,()=>reading.r
 new ResizeObserver(()=>fitPdfText($('sourceContent'))).observe($('sourceContent'));
 
 const settingsUI=setupSettings({notice,onClose:async()=>{
+  if(!workspace){await loadList();const saved=new URL(savedWorkbenchURL(sessionStorage.getItem('workbench-location')),location.origin).hash.match(/^#([a-f0-9]+)(?:\/thread\/([a-f0-9]+))?$/);if(saved)await selectWorkspace(saved[1],saved[2]);else if(workspaces.length)await selectWorkspace(workspaces[0].id);else{location.assign('/spaces');return;}}
   await Promise.all([loadModels(),loadRiskSchemes()]);
   if(tid&&!state.permission_override&&state.status?.type==='idle'){const preferences=await api('/api/settings');state.permission_mode=preferences.effective.permission_mode;updateControls();}
   if(tid&&state.status?.type==='idle'){
@@ -172,14 +175,14 @@ async function selectWorkspace(wid,requestedTid){
   let fresh=await api(`/api/workspaces/${wid}`,{signal:viewRequests.signal});
   if(view!==epoch)return;
   workspace=fresh;
-  if(!fresh.threads.length){
+  if(!fresh.threads.length&&(identity?.account_kind!=='demo'||identity.trial.threads_remaining>0)){
     try{await api(`/api/workspaces/${wid}/threads`,{method:'POST',body:{}});fresh=await api(`/api/workspaces/${wid}`);}
-    catch(e){if(view===epoch){renderWorkspace();notice('合同已上传。'+e.message+'，可稍后点击“新建对话”重试。');}return;}
+    catch(e){if(view===epoch){clearThreadSelection();renderWorkspace();await loadSource(fresh.document_id);notice(e.message,'error');}return;}
     if(view!==epoch)return;workspace=fresh;
   }
   threadFilter=requestedTid?threadScope(workspace.threads.find(t=>t.id===requestedTid)||{}):'active';
   const target=requestedTid||visibleThreads()[0]?.id;
-  if(!target){clearThreadSelection();renderWorkspace();await refreshWorkspace();await loadList();return;}
+  if(!target){clearThreadSelection();renderWorkspace();await loadSource(workspace.document_id);await refreshWorkspace();await loadList();return;}
   if(!workspace.threads.some(t=>t.id===target))throw new Error('指定的对话不存在');
   await selectThread(target);await loadList();
 }
@@ -196,7 +199,7 @@ function clearThreadSelection(){
   $('sourceContent').innerHTML='<p class="placeholder">选择对话后阅读合同原文。</p>';
   $('documentSelect').hidden=true;$('documentTitle').hidden=false;$('documentTitle').textContent='合同文档';
   $('threadTitle').textContent='选择或新建对话';
-  $('messageHistory').innerHTML='<div class="welcome"><h2>此范围暂无对话</h2><p>可切换查看范围，或点击左侧 ＋ 新建对话。</p></div>';
+  $('messageHistory').innerHTML='<div class="welcome"><h2>先阅读，再开启对话。</h2><p>原件可以直接阅读，不消耗请求次数或新建对话名额。点击左侧 ＋ 新建对话，也可以回到已有对话继续。</p></div>';
   $('todos').hidden=true;$('originalLink').hidden=true;
   history.replaceState(null,'',`/agent#${workspace.id}`);sessionStorage.removeItem('workbench-location');
   updateControls();
@@ -365,10 +368,11 @@ function renderRequests(){
 
 async function loadSource(docid){
   const view=epoch,load=++sourceEpoch;
-  const mapped=await api(`/api/documents/${docid}?thread_id=${tid}`);
+  const mapped=await api(`/api/documents/${docid}${tid?'?thread_id='+tid:''}`);
+  if(!tid&&view===epoch)state.documents=[mapped];
   if(view!==epoch||load!==sourceEpoch)return;
   source=mapped;sourceNavigation.setDocument(source);renderDocs();quotes.hide();$('sourceNavigationStatus').hidden=true;$('documentSelect').value=docid;
-  $('originalLink').href=`/api/documents/${docid}/file?thread_id=${tid}`;$('originalLink').hidden=false;
+  $('originalLink').href=`/api/documents/${docid}/file${tid?'?thread_id='+tid:''}`;$('originalLink').hidden=false;
   await renderSource();
 }
 
@@ -377,7 +381,7 @@ async function renderSource(){
   const host=$('sourceContent'),doc=source,view=epoch,load=sourceEpoch,render=++sourceRenderEpoch;
   sourceRendered=false;
   sourceNavigation.loading();
-  const url=`/api/documents/${doc.id}/file?thread_id=${tid}`;
+  const url=`/api/documents/${doc.id}/file${tid?'?thread_id='+tid:''}`;
   for(const mode of ['text','original']){const button=$(mode==='text'?'viewText':'viewOriginal');button.disabled=false;button.setAttribute('aria-pressed',String(sourceMode===mode));}
   host.classList.toggle('source-original-text',sourceMode==='original'&&doc.kind==='text');
   if(sourceMode==='text'||doc.kind==='text'){
@@ -652,7 +656,7 @@ $('viewText').onclick=protect(async()=>{sourceMode='text';await renderSource();}
 $('viewOriginal').onclick=protect(async()=>{sourceMode='original';await renderSource();});
 function syncPanelToggles(){
   const mobile=innerWidth<=1020;
-  const states=[['toggleRail','工作区',mobile?document.body.classList.contains('rail-mobile'):!document.body.classList.contains('workspace-rail-collapsed')],['toggleContext','原文与产出物',mobile?document.body.classList.contains('context-mobile'):!document.querySelector('main').classList.contains('context-closed')]];
+  const states=[['toggleRail','工作区',mobile?document.body.classList.contains('rail-mobile'):!document.body.classList.contains('workspace-rail-collapsed')]];
   for(const [id,label,expanded] of states){const button=$(id);button.setAttribute('aria-expanded',String(expanded));button.title=(expanded?'折叠':'显示')+label;button.setAttribute('aria-label',button.title);}
 }
 const panelStateObserver=new MutationObserver(syncPanelToggles);
@@ -660,7 +664,6 @@ for(const target of [document.body,document.querySelector('main')])panelStateObs
 window.matchMedia('(max-width:1020px)').addEventListener('change',syncPanelToggles);
 syncPanelToggles();
 $('toggleRail').onclick=()=>{if(innerWidth<=1020)document.body.classList.toggle('rail-mobile');else document.body.classList.toggle('workspace-rail-collapsed');};
-$('toggleContext').onclick=()=>{if(innerWidth<=1020)document.body.classList.toggle('context-mobile');else document.querySelector('main').classList.toggle('context-closed');};
 document.addEventListener('click',protect(async e=>{
   if(!e.target.closest('#workspaceSwitcher'))$('workspaceSwitcher').open=false;
   const b=e.target.closest('button');if(!b)return;
@@ -735,8 +738,8 @@ async function initialize(){
   await setupAuth();
   const route=settingsTab(location.pathname);
   document.body.dataset.auth='loading';$('authLoading').hidden=false;$('authLoadingText').textContent='正在打开工作台…';$('authRetry').hidden=true;$('loginView').hidden=true;
-  const me=await api('/api/me');document.body.dataset.auth='ready';$('authLoading').hidden=true;$('username').textContent=me.account_kind==='demo'?'':me.username;
-  if(route)await settingsUI.open(route,{historyMode:'replace',user:me});
+  const me=await api('/api/me');identity=me;document.body.dataset.accountKind=me.account_kind;document.body.dataset.auth='ready';$('authLoading').hidden=true;$('username').innerHTML=accountIdentityHTML(me);
+  if(route){await accountReady(me,{tour:false});await settingsUI.open(route,{historyMode:'replace',user:me});return;}
   const results=await Promise.allSettled([loadList(),loadModels(),loadRiskSchemes()]);
   for(const result of results)if(result.status==='rejected')notice(result.reason.message,'error');
   const hash=location.hash||(route?new URL(savedWorkbenchURL(sessionStorage.getItem('workbench-location')),location.origin).hash:'');

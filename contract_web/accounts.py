@@ -149,7 +149,9 @@ class Accounts:
         col,limit=('threads_created',self.limits()['demo_threads']) if kind=='thread' else ('uploads_created',self.limits()['demo_uploads'])
         with self.store.connect() as db:
             if not db.execute(f'UPDATE users SET {col}={col}+1 WHERE id=? AND {col}<? AND active=1 AND expires_at>?',(u['id'],limit,time.time())).rowcount:
-                raise HTTPException(403,'demo 体验额度已用完，请注册后继续使用')
+                remaining=self.usage(u)['remaining']
+                label='新建对话' if kind=='thread' else '上传文件'
+                raise HTTPException(403,f'demo 的{label}名额已用完；仍剩 {remaining} 次模型请求。可继续已有对话、阅读原件，或注册后创建更多内容。')
 
     def release_resource(self,u,kind):
         col='threads_created' if kind=='thread' else 'uploads_created'

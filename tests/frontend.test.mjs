@@ -1,9 +1,20 @@
 import {threadListHTML} from '../static/thread-ui.js';
+import {accountLabel,accountIdentityHTML} from '../static/account-identity.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {applyEvent,runIssue,unchangedEvent} from '../static/events.js';
 import {markdown} from '../static/markdown.js';
 import {addDiscoveredModel,waitForOperation} from '../static/provider-utils.js';
+
+test('registered identity shows email safely and never sends it to an avatar service',()=>{
+ const user={account_kind:'personal',username:'user-b2bab2208ca70844',email:'sample@example.com'};
+ assert.equal(accountLabel(user),user.email);
+ const html=accountIdentityHTML({...user,email:'<script>@example.com'});
+ assert.ok(html.includes('&lt;script&gt;@example.com'));assert.ok(!html.includes('<script>'));
+ assert.ok(html.includes('/static/brand/avatar-lucide.svg'));assert.ok(!html.includes('https://'));
+ assert.equal(accountLabel({account_kind:'demo',username:'demo-hidden'}),'访客');
+ assert.equal(accountLabel({username:'admin'}),'admin');
+});
 
 test('discovered models fill a blank row, preserve manual configuration and do not duplicate IDs',()=>{
  const existing=[{id:'custom/one',label:'业务模型',context:200000,output:16000,enabled:false,native:{reasoning:true}},

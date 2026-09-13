@@ -46,6 +46,27 @@ export function setupArtifactStrip(){
 
 export function setupReading(){
   const pane=$('contextPane');let mode='stacked';
+  const hidden=new Set();
+  const visible=name=>{
+    const rect=$(name==='source'?'docPane':'artPane').getBoundingClientRect();
+    return rect.width>0&&rect.height>0;
+  };
+  const sync=()=>{
+    for(const name of ['source','artifact'])$(name==='source'?'toggleSource':'toggleArtifact').setAttribute('aria-expanded',String(visible(name)));
+  };
+  const setPane=(name,visible)=>{
+    if(visible)hidden.delete(name);else hidden.add(name);
+    if(mode!=='stacked')apply('stacked');
+    pane.dataset.sourceHidden=String(hidden.has('source'));
+    pane.dataset.artifactHidden=String(hidden.has('artifact'));
+    document.querySelector('main').classList.toggle('context-closed',hidden.size===2);
+    if(innerWidth<=1020)document.body.classList.toggle('context-mobile',hidden.size<2);
+    for(const key of ['source','artifact']){
+      const button=$(key==='source'?'toggleSource':'toggleArtifact');
+      button.setAttribute('aria-expanded',String(!hidden.has(key)));
+      button.title=(hidden.has(key)?'显示':'隐藏')+(key==='source'?'合同原文':'产出物');
+    }
+  };
   const apply=value=>{
     const positions=['sourceContent','artBody','compareBody'].map(id=>{
       const el=$(id),top=el.getBoundingClientRect().top;
@@ -65,6 +86,13 @@ export function setupReading(){
     }));
   };
   document.querySelectorAll('button[data-layout]').forEach(b=>b.onclick=()=>apply(b.dataset.layout===mode?'stacked':b.dataset.layout));
+  for(const name of ['source','artifact']){
+    $(name==='source'?'toggleSource':'toggleArtifact').onclick=()=>setPane(name,!visible(name));
+    document.querySelector(`[data-close-pane="${name}"]`).onclick=()=>{setPane(name,false);$(name==='source'?'toggleSource':'toggleArtifact').focus();};
+  }
+  const observer=new MutationObserver(sync);
+  for(const target of [document.body,document.querySelector('main'),pane])observer.observe(target,{attributes:true,attributeFilter:['class','data-layout','data-source-hidden','data-artifact-hidden']});
+  window.addEventListener('resize',sync);requestAnimationFrame(sync);
   document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!e.defaultPrevented&&mode!=='stacked'){e.preventDefault();apply('stacked');}});
   document.addEventListener('click',e=>{document.querySelectorAll('.document-more').forEach(menu=>{if(!menu.contains(e.target))menu.open=false;});});
   document.querySelectorAll('.document-more').forEach(menu=>menu.addEventListener('keydown',e=>{if(e.key==='Escape'&&mode==='stacked'){menu.open=false;menu.querySelector('summary').focus();e.preventDefault();}}));
@@ -75,12 +103,12 @@ export function setupReading(){
   split.onpointermove=e=>{if(!drag)return;const rect=pane.getBoundingClientRect();change(sideBySide()?(e.clientX-rect.left)/rect.width*100:(e.clientY-$('docPane').getBoundingClientRect().top)/pane.clientHeight*100);};
   const stop=()=>{drag=false;document.body.classList.remove('resizing');};split.onpointerup=stop;split.onpointercancel=stop;
   split.onkeydown=e=>{if(!['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Home'].includes(e.key))return;e.preventDefault();const axis=sideBySide()?'width':'height',current=parseFloat(pane.style.getPropertyValue('--source-'+axis))||50;change(e.key==='Home'?50:current+(['ArrowDown','ArrowRight'].includes(e.key)?3:-3));};
-  return {showSource(){if(mode==='artifact')apply('compare');},showArtifact(){apply('artifact');},reset(){apply('stacked');}};
+  return {showSource(){setPane('source',true);},showArtifact(){setPane('artifact',true);apply('artifact');},reset(){apply('stacked');}};
 }
 
 export function pdfMarkup(doc,tid){
   const pages=new Map();for(const seg of doc.segments){if(!pages.has(seg.page))pages.set(seg.page,[]);pages.get(seg.page).push(seg);}
-  return doc.pages.map((p,i)=>`<div class="pdf-page" data-page="${i+1}" style="aspect-ratio:${p.w}/${p.h}"><img loading="lazy" draggable="false" src="/api/documents/${doc.id}/pages/${i+1}?thread_id=${tid}" alt="第 ${i+1} 页"><div class="pdf-text-layer">${(pages.get(i+1)||[]).filter(s=>s.bbox).map(s=>{const b=s.bbox;return `<span data-block="${s.id}" data-font-height="${(b[3]-b[1])/p.w}" style="left:${b[0]/p.w*100}%;top:${b[1]/p.h*100}%;width:${(b[2]-b[0])/p.w*100}%;height:${(b[3]-b[1])/p.h*100}%"><span>${esc(s.text)}</span></span>`;}).join('')}</div></div>`).join('');
+  return doc.pages.map((p,i)=>`<div class="pdf-page" data-page="${i+1}" style="aspect-ratio:${p.w}/${p.h}"><img loading="lazy" draggable="false" src="/api/documents/${doc.id}/pages/${i+1}${tid?'?thread_id='+tid:''}" alt="第 ${i+1} 页"><div class="pdf-text-layer">${(pages.get(i+1)||[]).filter(s=>s.bbox).map(s=>{const b=s.bbox;return `<span data-block="${s.id}" data-font-height="${(b[3]-b[1])/p.w}" style="left:${b[0]/p.w*100}%;top:${b[1]/p.h*100}%;width:${(b[2]-b[0])/p.w*100}%;height:${(b[3]-b[1])/p.h*100}%"><span>${esc(s.text)}</span></span>`;}).join('')}</div></div>`).join('');
 }
 
 export function fitPdfText(host){

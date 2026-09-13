@@ -153,6 +153,13 @@ def create_app(data_dir=None, runtime_factory=Runtime, library=None):
                          "AND (thread_id IS NULL OR thread_id=?)", (u["id"], t["workspace_id"], t["id"]))
 
     def document(u, docid, tid):
+        if not tid:
+            # Reading an owned primary source never requires a conversation or quota.
+            # Attachments still require their existing conversation access checks.
+            row = store.one("SELECT d.* FROM documents d JOIN workspaces w ON w.id=d.workspace_id WHERE d.id=? AND d.user_id=? AND w.user_id=? AND w.document_id=d.id AND w.deleted_at IS NULL", (docid, u["id"], u["id"]))
+            if not row:
+                raise HTTPException(404, "原文不存在或不属于当前账号")
+            return row
         t = thread(u, tid)
         row = next((d for d in documents_for(u, t) if d["id"] == docid), None)
         if not row:
@@ -409,7 +416,7 @@ def create_app(data_dir=None, runtime_factory=Runtime, library=None):
         return {"deleted": True, "id": docid}
 
     @app.get("/api/documents/{docid}")
-    async def get_document(docid: str, thread_id: str, request: Request):
+    async def get_document(docid: str, request: Request, thread_id: str | None = None):
         u = user(request)
         d = document(u, docid, thread_id)
         mapped = json.loads((source_dir(u, docid) / "document.json").read_text())
@@ -418,13 +425,13 @@ def create_app(data_dir=None, runtime_factory=Runtime, library=None):
         return {**d, **mapped}
 
     @app.get("/api/documents/{docid}/file")
-    async def get_original(docid: str, thread_id: str, request: Request):
+    async def get_original(docid: str, request: Request, thread_id: str | None = None):
         u = user(request)
         d = document(u, docid, thread_id)
         return FileResponse(source_dir(u, docid) / ("source"+d["suffix"]), filename=d["filename"])
 
     @app.get("/api/documents/{docid}/pages/{page}")
-    async def pdf_page(docid: str, page: int, thread_id: str, request: Request):
+    async def pdf_page(docid: str, page: int, request: Request, thread_id: str | None = None):
         u = user(request)
         d = document(u, docid, thread_id)
         if d["suffix"] != ".pdf":

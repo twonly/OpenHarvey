@@ -2,17 +2,18 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>合同空间 · 合同工作台</title>
-<link rel="icon" href="/static/brand/agent-logo-v1.png">
+<title>合同空间 · OpenHarvey</title>
+<link rel="icon" href="/static/brand/openharvey.svg">
 <link rel="stylesheet" href="/static/spaces.css?v=20260912-1">
 <link rel="stylesheet" href="/static/account-ui.css?v=20260913-header-2">
+<link rel="stylesheet" href="/static/workspace-controls.css?v=20260913-4">
 </head>
 <body data-auth="loading">
 <div id="authLoading" class="auth-loading" role="status">正在打开合同空间…</div>
 <section id="loginView" class="login-view" hidden>
   <form id="loginForm" class="login-card">
-    <img src="/static/brand/agent-logo-v1.png" width="46" height="46" alt="">
-    <p class="eyebrow">CONTRACT WORKBENCH</p><h1>回到你的合同空间</h1><p>合同、对话与产出物仅本人可见。</p>
+    <img src="/static/brand/openharvey.svg" width="46" height="46" alt="">
+    <p class="eyebrow">OPENHARVEY</p><h1>回到你的合同空间</h1><p>合同、对话与产出物仅本人可见。</p>
     <label>账号<input name="username" autocomplete="username" required></label>
     <label>密码<input name="password" type="password" autocomplete="current-password" required></label>
     <p id="loginError" role="alert"></p><button type="submit" class="primary">登录</button>
@@ -20,7 +21,7 @@
 </section>
 <div id="spacesApp" hidden>
   <header class="topbar">
-    <a href="/spaces" class="brand"><img src="/static/brand/agent-logo-v1.png" width="30" height="30" alt=""><span><b>合同工作台</b><small>CONTRACT WORKBENCH</small></span></a>
+    <a href="/spaces" class="brand"><img src="/static/brand/openharvey.svg" width="30" height="30" alt=""><span><b>OpenHarvey</b><small>OPENHARVEY</small></span></a>
     <nav><a href="/spaces" aria-current="page">合同空间</a><a href="/landing" target="_blank" rel="noopener">产品介绍 ↗</a><a href="/config">设置</a><span id="username"></span><button id="logout">退出</button></nav>
   </header>
   <main>
