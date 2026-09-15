@@ -27,7 +27,7 @@ class TrialSecurityTests(fixtures.WorkbenchTests):
         calls=[]
         def upstream(r):
             calls.append(r);self.assertEqual(r.url.host,'upstream.test');self.assertEqual(r.headers['authorization'],'Bearer SERVER_ONLY_SECRET')
-            self.assertEqual(json.loads(r.content)['max_tokens'],8192);self.assertNotIn('base_url',json.loads(r.content))
+            self.assertEqual(json.loads(r.content)['max_tokens'],128000);self.assertNotIn('base_url',json.loads(r.content))
             return httpx.Response(200,json={'choices':[{'message':{'content':'OK'}}]})
         self.assertEqual(self.relay(upstream,body,{**headers,'X-Workbench-Thread':'other'}).status_code,429)
         self.assertEqual(self.relay(upstream,{**body,'model':'expensive'},headers).status_code,403)
@@ -44,6 +44,22 @@ class TrialSecurityTests(fixtures.WorkbenchTests):
         self.assertEqual(self.store.one('SELECT model_accepted FROM trial_runs WHERE queue_id=?',(qa,))['model_accepted'],0)
         self.accounts.finish(qa,True);self.accounts.finish(qb,True)
         self.assertEqual(self.accounts.usage({'id':self.uid})['used'],1)
+
+    def test_native_title_can_overlap_body_without_releasing_its_slot(self):
+        _,t=self.make_workspace();qid=self.run_lease(t)
+        self.store.execute('INSERT INTO trial_tokens VALUES(?,?,?)',(digest('title-token'),self.uid,time.time()+60))
+        self.store.execute('UPDATE trial_runs SET proxy_active=1 WHERE queue_id=?',(qid,))
+        body={'model':'glm-5.3','messages':[]}
+        headers={'Authorization':'Bearer title-token','X-Workbench-Thread':t['id']}
+        def upstream(request):
+            self.assertEqual(self.store.one('SELECT proxy_active FROM trial_runs WHERE queue_id=?',(qid,))['proxy_active'],2)
+            return httpx.Response(200,json={'choices':[]})
+        self.assertEqual(self.relay(upstream,body,headers).status_code,200)
+        self.assertEqual(self.store.one('SELECT proxy_active FROM trial_runs WHERE queue_id=?',(qid,))['proxy_active'],1)
+        self.store.execute('UPDATE trial_runs SET proxy_active=2 WHERE queue_id=?',(qid,))
+        self.assertEqual(self.relay(upstream,body,headers).status_code,429)
+        self.store.execute('UPDATE trial_runs SET proxy_active=1,proxy_calls=? WHERE queue_id=?',(self.accounts.limits()['proxy_calls'],qid))
+        self.assertEqual(self.relay(upstream,body,headers).status_code,429)
 
     def test_upstream_connection_failure_refunds_once(self):
         _,t=self.make_workspace();qid=self.run_lease(t)
@@ -78,16 +94,20 @@ class TrialSecurityTests(fixtures.WorkbenchTests):
         self.assertEqual(response.status_code,200);self.assertNotIn('set-cookie',response.headers)
         self.assertEqual(before,self.store.all('SELECT * FROM logins WHERE user_id=?',(u['id'],)))
 
-    def test_timeout_aborts_native_and_releases_abandoned_probe(self):
+    def test_long_running_native_survives_and_abandoned_probe_is_released(self):
         _,t=self.make_workspace();qid=self.run_lease(t);u=self.accounts.fresh({'id':self.uid})
         with self.store.connect() as db:
             self.accounts.reserve(db,u,'operation-stale',{'model':'own/test'});self.accounts.claim(db,'operation-stale')
             db.execute('UPDATE trial_runs SET started=?',(time.time()-601,))
         runtime=type('Runtime',(),{'call':AsyncMock()})()
         with patch.object(self.app.state.queue,'runtime',return_value=runtime):asyncio.run(self.accounts.maintain(self.app))
+        runtime.call.assert_not_awaited()
+        self.assertEqual(self.store.one('SELECT status FROM trial_runs WHERE queue_id=?',(qid,))['status'],'running')
+        self.assertEqual(self.store.one('SELECT status FROM queued_messages WHERE id=?',(qid,))['status'],'submitted')
+        self.assertEqual(self.store.one('SELECT status FROM trial_runs WHERE queue_id=?',('operation-stale',))['status'],'done')
+        self.store.execute('UPDATE users SET active=0 WHERE id=?',(u['id'],))
+        with patch.object(self.app.state.queue,'runtime',return_value=runtime):asyncio.run(self.accounts.maintain(self.app))
         runtime.call.assert_awaited_once_with('POST',f'/session/{t["session_id"]}/abort',tid=t['id'])
-        self.assertFalse(self.store.one("SELECT 1 FROM trial_runs WHERE status='running'"))
-        self.assertEqual(self.store.one('SELECT status FROM queued_messages WHERE id=?',(qid,))['status'],'cancelled')
 
     def test_model_discovery_rejects_internal_addresses_and_pins_public_dns(self):
         models=self.app.state.models;cls=httpx.AsyncClient;requests=[]
@@ -198,6 +218,101 @@ class TrialSecurityTests(fixtures.WorkbenchTests):
             self.assertEqual(self.client.get('/api/demo/examples/missing/source/another-user').status_code,404)
         self.assertFalse(self.store.all('SELECT * FROM trial_runs'))
         self.assertFalse(self.store.all('SELECT * FROM e2b_bindings'))
+
+
+    def test_deepseek_connection_and_shared_allowance(self):
+        _,t=self.make_workspace();qid=self.run_lease(t)
+        self.store.execute('INSERT INTO trial_tokens VALUES(?,?,?)',(digest('ds-token'),self.uid,time.time()+60))
+        calls=[]
+        def upstream(r):
+            calls.append(r)
+            self.assertEqual(str(r.url),'https://api.deepseek.com/chat/completions')
+            self.assertEqual(r.headers['authorization'],'Bearer DEEPSEEK_SERVER_ONLY')
+            self.assertEqual(json.loads(r.content)['model'],'deepseek-flash')
+            return httpx.Response(200,json={'choices':[]})
+        with patch.dict(os.environ,{'CW_TRIAL_DEEPSEEK_KEY':'DEEPSEEK_SERVER_ONLY','CW_TRIAL_DEEPSEEK_BASE_URL':'https://api.deepseek.com'}):
+            result=self.relay(upstream,{'model':'deepseek-flash','messages':[]},{'Authorization':'Bearer ds-token','X-Workbench-Thread':t['id']})
+        self.assertEqual(result.status_code,200,result.text)
+        self.assertEqual(len(calls),1)
+        self.accounts.finish(qid)
+        u=self.accounts.create('demo')
+        for i in range(10):
+            with self.store.connect() as db:
+                self.accounts.reserve(db,u,'mixed-'+str(i),{'model':'trial/'+('glm-5.3' if i%2 else 'deepseek-flash')})
+        self.assertEqual(self.accounts.usage(u)['remaining'],0)
+        from fastapi import HTTPException
+        for model in ['glm-5.3','deepseek-flash']:
+            with self.assertRaises(HTTPException):
+                with self.store.connect() as db:self.accounts.reserve(db,u,'extra-'+model,{'model':'trial/'+model})
+
+    def test_existing_demo_catalog_refresh_preserves_token_and_usage(self):
+        u=self.accounts.create('demo');models=self.app.state.models;scope=models.scope(u)
+        with patch.dict(os.environ,{'CW_TRIAL_MODEL_KEY':'GLM_SERVER_ONLY','CW_TRIAL_MODEL':'glm-5.3','CW_PUBLIC_ORIGIN':'https://workbench.test','CW_TRIAL_DEEPSEEK_KEY':''}):
+            self.app.state.ensure_trial(u)
+            old=models.rows(scope)[0]
+            self.store.execute('UPDATE users SET trial_used=3 WHERE id=?',(u['id'],))
+            with patch.dict(os.environ,{'CW_TRIAL_DEEPSEEK_KEY':'DEEPSEEK_SERVER_ONLY'}):
+                self.app.state.ensure_trial(u)
+                updated=models.rows(scope)[0]
+                self.assertEqual([m['label'] for m in updated['models']],['GLM-5.3-flash','deepseek-flash'])
+                self.assertEqual(updated['secret'],old['secret'])
+                self.assertEqual(self.accounts.usage(u)['used'],3)
+                self.app.state.ensure_trial(u)
+                self.assertEqual(models.rows(scope)[0]['revision'],updated['revision'])
+                public=json.dumps(models.public(scope))
+                self.assertNotIn('DEEPSEEK_SERVER_ONLY',public)
+                self.assertNotIn('GLM_SERVER_ONLY',public)
+
+    def test_model_budgets_and_old_long_run_relay(self):
+        from contract_web.trial_models import public_trial_models
+        with patch.dict(os.environ,{'CW_TRIAL_MODEL_KEY':'key','CW_TRIAL_MODEL':'glm-5.3','CW_TRIAL_DEEPSEEK_KEY':'key'}):
+            catalog={m['id']:m for m in public_trial_models()}
+            self.assertEqual({k:(m['context'],m['output']) for k,m in catalog.items()},
+                             {'glm-5.3-flash':(1000000,128000),'deepseek-flash':(1000000,384000)})
+        _,t=self.make_workspace();qid=self.run_lease(t)
+        self.store.execute('UPDATE trial_runs SET started=? WHERE queue_id=?',(time.time()-7200,qid))
+        self.store.execute('INSERT INTO trial_tokens VALUES(?,?,?)',(digest('long-run'),self.uid,time.time()+60))
+        seen=[]
+        def upstream(request):seen.append(json.loads(request.content));return httpx.Response(200,json={'choices':[]})
+        headers={'Authorization':'Bearer long-run','X-Workbench-Thread':t['id']}
+        for requested,expected in [(None,128000),(32768,32768),(999999,128000)]:
+            body={'model':'glm-5.3-flash','messages':[]}
+            if requested:body['max_tokens']=requested
+            response=self.relay(upstream,body,headers);self.assertEqual(response.status_code,200,response.text)
+            self.assertEqual(seen[-1]['max_tokens'],expected)
+        with patch.dict(os.environ,{'CW_TRIAL_DEEPSEEK_KEY':'secret','CW_TRIAL_DEEPSEEK_BASE_URL':'https://upstream.test/v1'}):
+            response=self.relay(upstream,{'model':'deepseek-flash','messages':[]},headers)
+        self.assertEqual(response.status_code,200,response.text);self.assertEqual(seen[-1]['max_tokens'],384000)
+        for invalid in [True,0,-1,'384000']:
+            response=self.relay(upstream,{'model':'glm-5.3-flash','messages':[],'max_tokens':invalid},headers)
+            self.assertEqual(response.status_code,422)
+        self.store.execute('INSERT OR REPLACE INTO platform_settings VALUES(1,?)',(json.dumps({'run_seconds':600}),))
+        self.assertNotIn('run_seconds',self.accounts.limits())
+
+    def test_platform_model_rename_keeps_selections_quota_and_history(self):
+        _,t=self.make_workspace();u=self.accounts.fresh({'id':self.uid})
+        self.store.execute('UPDATE users SET model=? WHERE id=?',('trial/glm-5.3',u['id']))
+        self.store.execute('UPDATE threads SET model=? WHERE id=?',('trial/glm-5.3',t['id']))
+        qid=self.app.state.queue.enqueue(u,t['id'],{'model':'trial/glm-5.3','text':'test','request_id':'rename'})
+        with patch.dict(os.environ,{'CW_TRIAL_MODEL_KEY':'key','CW_TRIAL_MODEL':'glm-5.3','CW_PUBLIC_ORIGIN':'https://workbench.test'}):
+            self.app.state.ensure_trial(self.accounts.fresh(u))
+        self.assertEqual(self.accounts.fresh(u)['model'],'trial/glm-5.3-flash')
+        self.assertEqual(self.store.one('SELECT model FROM threads WHERE id=?',(t['id'],))['model'],'trial/glm-5.3-flash')
+        row=self.store.one('SELECT body FROM queued_messages WHERE id=?',(qid,))
+        self.assertEqual(json.loads(row['body'])['model'],'trial/glm-5.3-flash')
+        self.assertEqual(self.accounts.usage(u)['used'],1)
+
+    def test_large_context_and_stream_are_not_cut_by_old_byte_caps(self):
+        _,t=self.make_workspace();self.run_lease(t)
+        self.store.execute('INSERT INTO trial_tokens VALUES(?,?,?)',(digest('large-token'),self.uid,time.time()+60))
+        output=b'x'*4_100_000
+        def upstream(request):
+            self.assertGreater(len(request.content),2_000_000)
+            return httpx.Response(200,content=output)
+        response=self.relay(upstream,{'model':'glm-5.3-flash','messages':[{'role':'user','content':'x'*2_100_000}]},
+                            {'Authorization':'Bearer large-token','X-Workbench-Thread':t['id']})
+        self.assertEqual(response.status_code,200,response.text[:100])
+        self.assertEqual(len(response.content),len(output))
 
 for _name in list(vars(fixtures.WorkbenchTests)):
     if _name.startswith('test_') and _name not in vars(TrialSecurityTests):setattr(TrialSecurityTests,_name,None)

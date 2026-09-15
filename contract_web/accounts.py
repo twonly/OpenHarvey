@@ -14,7 +14,7 @@ from .store import digest
 PUBLIC_RISK='public-risk-examples'
 LIMITS={'demo_hours':24,'demo_threads':3,'demo_requests':10,'demo_uploads':2,'upload_mb':10,
         'personal_requests':20,'user_concurrency':2,'global_concurrency':2,'global_daily':100,
-        'personal_daily':20,'run_seconds':600,'proxy_calls':80}
+        'personal_daily':20,'proxy_calls':80}
 RULES=[
  {'id':'EX-PAY','name':'付款安排','category':'付款','enabled':True,'baseline':'示例标准：预付款为合同价的20%，里程碑款50%，验收款30%，付款期限为收到合规发票后30日。','definition':'检查付款触发条件是否客观明确，是否附带无法控制的第三方回款条件，尾款比例和期限是否可接受。以上比例为虚构示例，不代表任何公司的真实制度。'},
  {'id':'EX-ACCEPT','name':'验收标准与期限','category':'验收','enabled':True,'baseline':'示例标准：交付后15个工作日内书面验收，异议应具体列明不符合项，并约定整改与复验流程。','definition':'检查标准、验收主体、期限、异议处理与逾期后果是否明确。期限为演示数据。'},
@@ -78,7 +78,9 @@ class Accounts:
 
     def limits(self):
         row=self.store.one('SELECT value FROM platform_settings WHERE id=1')
-        return LIMITS| (json.loads(row['value']) if row else {})
+        values=LIMITS| (json.loads(row['value']) if row else {})
+        values.pop('run_seconds',None) # Retired: native runs have no application wall-clock deadline.
+        return values
 
     def fresh(self,u):return self.store.one('SELECT * FROM users WHERE id=?',(u['id'],))
 
@@ -111,7 +113,9 @@ class Accounts:
         self.store.execute('UPDATE users SET account_kind=?,expires_at=?,risk_scheme=?,trial_total=? WHERE id=?',(kind,expires,PUBLIC_RISK,l['demo_requests'] if kind=='demo' else l['personal_requests'],uid))
         return self.store.one('SELECT * FROM users WHERE id=?',(uid,))
 
-    def login(self,u,seconds=86400):
+    def login(self,u,seconds=None):
+        from .session_policy import session_seconds
+        seconds = session_seconds() if seconds is None else seconds
         if not u['active']:raise HTTPException(403,'账号已停用')
         token=secrets.token_urlsafe(32);expires=min(time.time()+seconds,u['expires_at'] or float('inf'))
         self.store.execute('INSERT INTO logins VALUES(?,?,?)',(digest(token),u['id'],expires));return token
@@ -201,7 +205,7 @@ class Accounts:
             db.execute('BEGIN IMMEDIATE');self.reserve(db,u,qid,{'model':'own/connection-test'})
             if not self.claim(db,qid):raise HTTPException(429,'当前运行已满，请待任务完成后重试模型连接')
         try:
-            async with asyncio.timeout(self.limits()['run_seconds']):return await action()
+            async with asyncio.timeout(60):return await action()
         finally:self.finish(qid)
 
     async def maintain(self,app):
@@ -216,13 +220,13 @@ class Accounts:
                 stream=app.state.e2b.streams.pop(t['id'],None)
                 if stream:stream.cancel();await asyncio.gather(stream,return_exceptions=True)
         # Connection probes have no outbox entry; release abandoned leases after a crash.
-        for row in self.store.all("SELECT queue_id FROM trial_runs WHERE queue_id LIKE 'operation-%' AND status='running' AND started<?",(time.time()-self.limits()['run_seconds'],)):
+        for row in self.store.all("SELECT queue_id FROM trial_runs WHERE queue_id LIKE 'operation-%' AND status='running' AND started<?",(time.time()-60,)):
             self.finish(row['queue_id'])
         for row in self.store.all("SELECT r.queue_id,q.status,q.stage FROM trial_runs r JOIN queued_messages q ON q.id=r.queue_id WHERE r.status IN ('running','reserved') AND q.status IN ('completed','cancelled','withdrawn','failed')"):
             self.finish(row['queue_id'],row['status']=='withdrawn' or (row['status']=='failed' and row['stage']!='submitting'))
-        for r in self.store.all("SELECT r.*,q.thread_id FROM trial_runs r JOIN queued_messages q ON q.id=r.queue_id WHERE r.status='running' AND (r.started<? OR r.user_id IN (SELECT id FROM users WHERE active=0))",(time.time()-self.limits()['run_seconds'],)):
+        for r in self.store.all("SELECT r.*,q.thread_id FROM trial_runs r JOIN queued_messages q ON q.id=r.queue_id WHERE r.status='running' AND r.user_id IN (SELECT id FROM users WHERE active=0)"):
             u=self.store.one('SELECT * FROM users WHERE id=?',(r['user_id'],));t=self.store.one('SELECT * FROM threads WHERE id=?',(r['thread_id'],))
-            reason='本次运行已达到时长上限' if u['active'] else '账号已停用，任务已停止'
+            reason='账号已停用，任务已停止'
             app.state.queue.pause(t['id'],reason)
             try:
                 async with asyncio.timeout(10):

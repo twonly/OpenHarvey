@@ -1,4 +1,6 @@
+import {t as tr,ui} from './i18n.js';
 import {esc} from './markdown.js';
+import {api} from './api.js';
 const $=id=>document.getElementById(id);
 
 // Keep offsets in the original UTF-16 text, even when case folding expands a
@@ -26,14 +28,34 @@ export function searchMatches(index,query){
 }
 
 export function outlineHTML(outline){
+  if(outline?.status==='pending')return tr('<p class="outline-empty" role="status">正在识别目录…<small>识别完成后会自动显示，可继续阅读原文。</small></p>');
   const entries=outline?.entries||[];
-  if(!entries.length)return `<p class="outline-empty">${outline?.unavailable?'目录暂时无法读取。': '原文未提供可用目录。'}<small>支持 Word 标题层级、PDF 书签和 Markdown 标题。</small></p>`;
-  return `<p class="outline-caption">${{'word-headings':'来自 Word 标题','pdf-bookmarks':'来自 PDF 书签','markdown-headings':'来自 Markdown 标题'}[outline.source]||'文档目录'}</p><ol>${entries.map((entry,i)=>`<li><button type="button" data-outline="${i}" style="--outline-depth:${Math.max(0,Math.min(8,Number(entry.level)-1||0))}" title="${esc(entry.title)}"><span>${esc(entry.title)}</span>${entry.page?`<small>${Number(entry.page)} 页</small>`:''}</button></li>`).join('')}</ol>`;
+  if(!entries.length)return ui`<p class="outline-empty">${outline?.unavailable?tr('目录暂时无法读取。'): tr('原文未提供可用目录。')}<small>支持 Word 标题层级、PDF 书签、PDF 可点击目录和 Markdown 标题。</small></p>`;
+  return `<p class="outline-caption">${{'word-headings':tr('来自 Word 标题'),'pdf-bookmarks':tr('来自 PDF 书签'),'pdf-toc-links':tr('来自 PDF 目录页'),'markdown-headings':tr('来自 Markdown 标题')}[outline.source]||tr('文档目录')}</p><ol>${entries.map((entry,i)=>`<li><button type="button" data-outline="${i}" style="--outline-depth:${Math.max(0,Math.min(8,Number(entry.level)-1||0))}" title="${esc(entry.title)}"><span>${esc(entry.title)}</span>${entry.page?ui`<small>${Number(entry.page)} 页</small>`:''}</button></li>`).join('')}</ol>`;
+}
+
+export function watchDocumentOutline(load,update,delay=750){
+  const controller=new AbortController();let timer,attempts=0,interval=delay;
+  const poll=async()=>{
+    try{
+      const result=await load(controller.signal);
+      if(controller.signal.aborted)return;
+      attempts=0;
+      if(result.status!=='pending'){update(result);return;}
+    }catch(error){
+      if(controller.signal.aborted)return;
+      if(++attempts>=3||[401,403,404].includes(error.status)){update({entries:[],unavailable:true});return;}
+    }
+    interval=Math.min(5000,interval*1.5);timer=setTimeout(poll,interval);
+  };
+  timer=setTimeout(poll,delay);
+  return ()=>{clearTimeout(timer);controller.abort();};
 }
 
 export function setupDocumentNavigation(onNavigate,onError){
   const host=$('sourceContent'),input=$('sourceSearch'),outline=$('sourceOutline');
   let doc=null,index=searchIndex(''),chunks=[],ranges=[],current=-1,timer=null,ready=false,revision=0;
+  let stopOutline=()=>{},outlineThread=null;
   const supported=!!globalThis.CSS?.highlights&&!!globalThis.Highlight;
   const clearHighlights=()=>{
     if(supported){CSS.highlights.delete('source-search');CSS.highlights.delete('source-search-current');}
@@ -41,8 +63,8 @@ export function setupDocumentNavigation(onNavigate,onError){
   };
   const controls=()=>{
     const hasQuery=!!searchIndex(input.value).value;
-    $('sourceSearchCount').textContent=hasQuery?(ready?(ranges.length?`${current+1} / ${ranges.length}`:'无匹配'):'正在加载…'):'';
-    $('sourceSearchCount').title=hasQuery&&ready?`当前文档共 ${ranges.length} 处匹配`:'';
+    $('sourceSearchCount').textContent=hasQuery?(ready?(ranges.length?`${current+1} / ${ranges.length}`:tr('无匹配')):tr('正在加载…')):'';
+    $('sourceSearchCount').title=hasQuery&&ready?ui`当前文档共 ${ranges.length} 处匹配`:'';
     $('sourceSearchPrev').disabled=$('sourceSearchNext').disabled=!ranges.length||!ready;
     $('sourceSearchClear').hidden=!input.value;
     input.disabled=!doc;
@@ -127,10 +149,22 @@ export function setupDocumentNavigation(onNavigate,onError){
   });
   const loading=()=>{ready=false;clearTimeout(timer);timer=null;ranges=[];chunks=[];index=searchIndex('');clearHighlights();controls();};
   return {
-    setDocument(value){
-      if(doc?.id===value?.id&&doc?.source_hash===value?.source_hash)return;
+    setDocument(value,threadId=null){
+      if(doc?.id===value?.id&&doc?.source_hash===value?.source_hash&&outlineThread===threadId)return;
+      stopOutline();outlineThread=threadId;
       revision++;doc=value;input.value='';current=-1;loading();
       $('sourceOutlineBody').innerHTML=outlineHTML(doc?.outline);
+      if(doc?.outline?.status==='pending'){
+        const version=revision,active=doc;
+        stopOutline=watchDocumentOutline(async signal=>{
+          const result=await api(`/api/documents/${active.id}/outline${threadId?'?thread_id='+encodeURIComponent(threadId):''}`,{signal,timeout:10000});
+          if(result.source_hash!==active.source_hash)throw new Error(tr('文档版本已变化'));
+          return result.outline;
+        },result=>{
+          if(version!==revision)return;
+          active.outline=result;$('sourceOutlineBody').innerHTML=outlineHTML(result);
+        });
+      }
       setSearchOpen(false);if(!doc)setOutlineOpen(false);
     },
     loading,

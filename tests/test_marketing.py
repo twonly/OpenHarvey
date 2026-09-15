@@ -26,6 +26,13 @@ class MarketingTests(unittest.TestCase):
         app=FastAPI();page=register_marketing(app,None)
         app.add_api_route('/',lambda:page(),methods=['GET'])
         self.client=TestClient(app);self.addCleanup(self.client.close)
+    def test_connector_scenarios_and_acceptance_boundaries_are_bilingual(self):
+        for path in ('/','/en','/features','/en/features'):
+            body=self.client.get(path).text
+            self.assertIn('id="feishu-lark"',body)
+            self.assertIn('/connectors',body)
+            self.assertIn('Lark',body)
+            self.assertIn('live-account acceptance' if path.startswith('/en') else '尚待真实账号验收',body)
     def test_sitemap_targets_are_bilingual_canonical_and_have_valid_schema(self):
         tree=ET.fromstring(self.client.get('/sitemap.xml').text)
         urls=[node.text for node in tree.findall('{*}url/{*}loc')]
@@ -54,7 +61,7 @@ class MarketingTests(unittest.TestCase):
         robots=self.client.get('/robots.txt').text
         for private in ('/api/','/agent','/auth/','/traces','/trial-model/'):
             self.assertIn('Disallow: '+private,robots)
-        self.assertIn('primarily Chinese',self.client.get('/en').text)
+        self.assertIn('English and Chinese interfaces',self.client.get('/en').text)
         self.assertIn('not affiliated',self.client.get('/en/harvey-alternative').text)
         self.assertIn('remote models',self.client.get('/en/security').text)
 
@@ -78,3 +85,12 @@ class MarketingTests(unittest.TestCase):
             body=self.client.get(path).text
             self.assertIn('class="showcase-grid"',body)
             self.assertNotIn('href="https://agent.tokrace.com',body)
+
+    def test_english_entries_carry_language_to_demo_workspace_and_guide(self):
+        for path in ['/en','/en/features','/en/security']:
+            html=self.client.get(path).text
+            for target in ['spaces','guide']:
+                self.assertIn('href="/'+target+'?lang=en"',html)
+            self.assertNotIn('href="/demo"',html)
+        self.assertIn('href="/demo?lang=en"',self.client.get('/en').text)
+        self.assertIn('href="/demo"',self.client.get('/').text)

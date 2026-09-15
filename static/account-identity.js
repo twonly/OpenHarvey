@@ -1,7 +1,8 @@
+import {t as tr} from './i18n.js';
 import {esc} from './markdown.js';
 
 export function accountLabel(me){
-  return me.account_kind==='demo'?'访客':me.email||me.username||'我的账户';
+  return me.account_kind==='demo'?tr('访客'):me.email||me.username||tr('我的账户');
 }
 export function accountIdentityHTML(me){
   const label=esc(accountLabel(me));

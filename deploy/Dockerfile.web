@@ -1,10 +1,25 @@
-FROM python:3.12-slim
+FROM golang:1.25-bookworm AS feishu-build
+WORKDIR /build
+RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates && rm -rf /var/lib/apt/lists/*
+RUN curl -fsSL https://codeload.github.com/larksuite/cli/tar.gz/refs/tags/v1.0.76 | tar xz --strip-components=1
+COPY deploy/feishu/credential_adapter.go ./cmd/workbench-credentials/main.go
+RUN CGO_ENABLED=0 go build -trimpath -o /out/feishu-credential-adapter ./cmd/workbench-credentials
+
+FROM node:22-bookworm-slim AS feishu-cli
+RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates && rm -rf /var/lib/apt/lists/*
+RUN npm install -g --prefix /opt/feishu @larksuite/cli@1.0.76
+
+FROM python:3.12-slim-bookworm
 WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 COPY contract_web ./contract_web
 COPY static ./static
 COPY runtime ./runtime
+COPY --from=feishu-build /out/feishu-credential-adapter /usr/local/bin/feishu-credential-adapter
+COPY --from=feishu-cli /usr/local/bin/node /usr/local/bin/node
+COPY --from=feishu-cli /opt/feishu /opt/feishu
+ENV PATH="/opt/feishu/bin:${PATH}" CW_FEISHU_CREDENTIAL_ADAPTER=/usr/local/bin/feishu-credential-adapter
 ENV CW_DATA_DIR=/data PYTHONDONTWRITEBYTECODE=1
 EXPOSE 8080
 CMD ["uvicorn", "contract_web.app:create_app", "--factory", "--host", "0.0.0.0", "--port", "8080", "--timeout-graceful-shutdown", "10"]

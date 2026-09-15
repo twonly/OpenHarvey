@@ -20,6 +20,7 @@ class PdfPreviewTests(unittest.TestCase):
             def close(self):counts['bitmaps']+=1
 
         class Page:
+            def get_size(self):return (595,842)
             def render(self,scale):return Bitmap()
             def close(self):counts['pages']+=1
 
@@ -54,3 +55,18 @@ class PdfPreviewTests(unittest.TestCase):
              patch('PIL.Image.Image.save',side_effect=OSError('encode failure')):
             with self.assertRaisesRegex(OSError,'encode failure'):render_pdf_page('unused.pdf',1)
         self.assertIsNone(bitmap.raw);self.assertIsNone(page.raw);self.assertIsNone(pdf.raw)
+
+    def test_resolution_tracks_requested_width_without_changing_source(self):
+        import hashlib
+        from pathlib import Path
+        path=Path(__file__).parent/'fixtures/text-contract.pdf'
+        before=hashlib.sha256(path.read_bytes()).hexdigest()
+        dimensions=[]
+        for width in (960,1920,2880):
+            with Image.open(io.BytesIO(render_pdf_page(path,1,width))) as image:
+                self.assertEqual(image.width,width)
+                dimensions.append(image.size)
+        self.assertAlmostEqual(dimensions[1][1]/dimensions[0][1],2,delta=.002)
+        self.assertEqual(hashlib.sha256(path.read_bytes()).hexdigest(),before)
+        for invalid in (0,100000):
+            with self.assertRaises(ValueError):render_pdf_page(path,1,invalid)

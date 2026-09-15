@@ -1,31 +1,42 @@
+import {t as tr} from './i18n.js';
 export function unchangedEvent(state,event){
   const field=event.type==='session.status'?'status':event.type==='todo.updated'?'todos':null;
   return !!field&&JSON.stringify(state[field])===JSON.stringify(event.properties?.[field]);
 }
 
+export function isCompaction(info){return info?.summary===true||info?.mode==='compaction'||info?.agent==='compaction';}
+export function isCompactionContinuation(part){
+  return part?.type==='text'&&part.synthetic===true&&(part.metadata?.compaction_continue===true||part.text?.endsWith('Continue if you have next steps, or stop and ask for clarification if you are unsure how to proceed.'));
+}
 // UI projections only: native messages/status remain authoritative on reconnect.
 export function errorText(error){
-  if(error?.name==='MessageAbortedError')return '本次运行已停止，可以继续对话。';
-  return error?.data?.message||error?.name||'本次运行未完成';
+  if(error?.name==='MessageAbortedError')return tr('本次运行已停止，可以继续对话。');
+  return error?.data?.message||error?.name||tr('本次运行未完成');
 }
 export function messageIssue(info){
   if(info?.error)return errorText(info.error);
-  if(info?.finish==='length')return '模型已达到本次输出上限，任务尚未完成。可以发送“继续”接着处理。';
-  if(info?.finish==='content-filter')return '模型服务未返回完整答复。';
+  if(info?.finish==='length')return tr('模型已达到本次输出上限，任务尚未完成。可以发送“继续”接着处理。');
+  if(info?.finish==='content-filter')return tr('模型服务未返回完整答复。');
   return null;
+}
+export function visibleMessageIssue(state,index){
+  const info=state.messages?.[index]?.info;
+  // A per-call token limit is actionable only after the native run stops.
+  if(info?.finish==='length'&&!info.error&&(state.status?.type!=='idle'||index!==state.messages.length-1))return null;
+  return messageIssue(info);
 }
 export function runIssue(state){
   const last=state.messages?.at(-1)?.info;
-  return messageIssue(last)||(state.status?.type==='idle'&&last?.role==='assistant'&&!last.time?.completed
-    ?'上次运行已中断，可以发送消息继续。':null);
+  return visibleMessageIssue(state,(state.messages?.length||0)-1)||(state.status?.type==='idle'&&last?.role==='assistant'&&!last.time?.completed
+    ?tr('上次运行已中断，可以发送消息继续。'):null);
 }
 export function applyEvent(state,event){
   const p=event.properties||{};
-  if(event.type==='workbench.queue'){state.queue=p.queue;}
+  if(event.type==='session.updated'){state.title=p.info.title;}
+  else if(event.type==='workbench.queue'){state.queue=p.queue;}
   else if(event.type==='message.updated'){
     const found=state.messages.find(m=>m.info.id===p.info.id);
     if(found) found.info=p.info; else state.messages.push({info:p.info,parts:[]});
-    if(messageIssue(p.info))state.error=messageIssue(p.info);
   } else if(event.type==='message.part.updated'){
     const part=p.part;
     let m=state.messages.find(m=>m.info.id===part.messageID);

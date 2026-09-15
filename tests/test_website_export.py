@@ -12,7 +12,7 @@ class WebsiteExportTests(unittest.TestCase):
     def test_same_origin_routes_cover_workbench_without_exposing_internal_endpoints(self):
         config=hosting_config('https://backend.example.com/')
         routes={r['source']:r['destination'] for r in config['rewrites']}
-        for path in ('/demo','/login','/agent','/model','/api/:path*','/static/:path*','/auth/:path*','/orca/:path*'):
+        for path in ('/connectors','/demo','/login','/agent','/model','/ops','/ops/:path*','/api/:path*','/static/:path*','/auth/:path*','/orca/:path*','/trial-model/:path*'):
             self.assertEqual(routes[path],'https://backend.example.com'+path)
         self.assertNotIn('/internal/:path*',routes)
         for row in config['headers']:
@@ -31,10 +31,11 @@ class WebsiteExportTests(unittest.TestCase):
             for path in ('index.html','en.html'):
                 body=(dest/path).read_text()
                 self.assertNotIn('agent.tokrace.com',body)
+                self.assertIn('site-telemetry.js',body)
                 for link in ('/demo','/spaces','/guide'):
-                    self.assertIn('href="'+link+'"',body)
+                    self.assertIn('href="'+link+('?lang=en' if path=='en.html' else '')+'"',body)
             self.assertTrue(json.loads((dest/'vercel.json').read_text())['rewrites'])
-            for path in ('features.html','en/features.html','static/showcase.css'):
+            for path in ('features.html','en/features.html','static/showcase.css','static/site-telemetry.js'):
                 self.assertTrue((dest/path).is_file(),path)
             for path in (root/'static/product').glob('*.png'):
                 self.assertEqual((dest/'static/product'/path.name).read_bytes(),path.read_bytes())

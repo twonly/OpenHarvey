@@ -1,3 +1,4 @@
+import {t as tr,ui} from '../static/i18n.js';
 import {threadListHTML} from '../static/thread-ui.js';
 import {accountLabel,accountIdentityHTML} from '../static/account-identity.js';
 import test from 'node:test';
@@ -6,6 +7,27 @@ import {readFileSync} from 'node:fs';
 import {applyEvent,runIssue,unchangedEvent} from '../static/events.js';
 import {markdown} from '../static/markdown.js';
 import {addDiscoveredModel,waitForOperation} from '../static/provider-utils.js';
+import {orcaConnectHTML} from '../static/orca-connect.js';
+
+test('logged-out entry does not expose the workspace below the login page',()=>{
+ const css=readFileSync(new URL('../static/account-ui.css',import.meta.url),'utf8');
+ assert.ok(css.includes('body[data-auth=logged-out]>header,body[data-auth=logged-out]>#appShell,body[data-auth=logged-out]>#settingsView{display:none}'));
+});
+
+test('settings hide workspace panel controls and Skills omit environment status',()=>{
+ const css=readFileSync(new URL('../static/settings-ui.css',import.meta.url),'utf8');
+ const source=readFileSync(new URL('../static/settings-ui.js',import.meta.url),'utf8');
+ assert.ok(css.includes('body:has(#settingsView:not([hidden]))>header .panel-toggle{display:none}'));
+ assert.ok(!source.includes('skillEnvironmentsHTML'));assert.ok(!source.includes('skillEnvironments'));
+ assert.ok(!source.includes('/api/skill-environments'));assert.ok(!source.includes('合同环境生效状态'));
+});
+
+test('OrcaRouter card presents clear connect and registration paths',()=>{
+ const html=orcaConnectHTML({account_kind:'personal'});
+ assert.match(html,/连接已有 OrcaRouter 账号/);assert.match(html,/还没有 OrcaRouter 账号/);
+ assert.match(html,/免费注册并获取可用的 API Key/);assert.match(html,/授权在 OrcaRouter 完成/);
+ assert.doesNotMatch(html,/没有 API Key？/);assert.equal((html.match(/ref_d0785b3ec87207162565/g)||[]).length,1);
+});
 
 test('reading toolbar keeps modes left and ordered actions at the right',()=>{
  const html=readFileSync(new URL('../static/index.html',import.meta.url),'utf8');
@@ -27,8 +49,8 @@ test('registered identity shows email safely and never sends it to an avatar ser
 });
 
 test('demo spinner remains visible during both loading stages and stops on failure or captcha',async()=>{
- const {runInNewContext}=await import('node:vm');
- const source=readFileSync(new URL('../static/demo.js',import.meta.url),'utf8').replace(/^import .*;\n/,'');
+ const {runInNewContext: runVM}=await import('node:vm');const runInNewContext=(code,context)=>runVM(code,Object.assign(context,{tr,ui,getLanguage:()=>'zh-CN',accountLanguage:async()=>{}}));
+ const source=readFileSync(new URL('../static/demo.js',import.meta.url),'utf8').replace(/^import .*;\n/gm,'');
  const elements={status:{textContent:''},startDemo:{hidden:true},demoSpinner:{hidden:false}};
  const calls=[];let destination;
  const context={document:{getElementById:id=>elements[id]},location:{replace:url=>destination=url},api:path=>new Promise((resolve,reject)=>calls.push({path,resolve,reject}))};
@@ -41,9 +63,9 @@ test('demo spinner remains visible during both loading stages and stops on failu
  calls[2].resolve({});await tick();
  const retry=elements.startDemo.onclick();assert.equal(elements.demoSpinner.hidden,false);assert.equal(elements.startDemo.hidden,true);
  calls[3].resolve({});await tick();calls[4].resolve({workspace_id:'demo-test'});await retry;
- assert.equal(destination,'/agent#demo-test');assert.equal(elements.demoSpinner.hidden,false);
+ assert.equal(destination,'/agent?lang=zh-CN#demo-test');assert.equal(elements.demoSpinner.hidden,false);
  const css=readFileSync(new URL('../static/account-ui.css',import.meta.url),'utf8');
- assert.ok(css.includes('@media(prefers-reduced-motion:reduce){.demo-spinner{animation:none}}'));
+ assert.ok(css.includes('@media(prefers-reduced-motion:reduce){.demo-spinner,.loading-spinner{animation:none}}'));
 });
 
 test('discovered models fill a blank row, preserve manual configuration and do not duplicate IDs',()=>{
@@ -100,7 +122,38 @@ test('native output limit is incomplete even without an API error',()=>{
   const s={messages:[]};
   applyEvent(s,{type:'message.updated',properties:{info:{id:'m1',role:'assistant',finish:'length'}}});
   applyEvent(s,{type:'session.status',properties:{status:{type:'idle'}}});
-  assert.ok(s.error.includes('任务尚未完成'));
+  assert.ok(runIssue(s).includes('任务尚未完成'));
+  assert.match(conversationHTML(s),/任务尚未完成/);
+});
+
+test('output limit during a native run is not a request to continue',()=>{
+  const s={messages:[],status:{type:'busy'}};
+  applyEvent(s,{type:'message.updated',properties:{info:{id:'m1',role:'assistant',finish:'length',time:{completed:101}}}});
+  for(const type of ['busy','retry']){
+    applyEvent(s,{type:'session.status',properties:{status:{type}}});
+    assert.equal(runIssue(s),null);
+    assert.doesNotMatch(conversationHTML(s),/任务尚未完成|发送“继续”/);
+  }
+  assert.equal(s.error,undefined);
+});
+
+test('native continuation and reconnect do not retain an earlier output limit warning',()=>{
+  const s={messages:[],status:{type:'idle'}};
+  applyEvent(s,{type:'message.updated',properties:{info:{id:'m1',role:'assistant',finish:'length',time:{completed:101}}}});
+  assert.match(runIssue(s),/任务尚未完成/);
+  applyEvent(s,{type:'session.status',properties:{status:{type:'busy'}}});
+  assert.equal(runIssue(s),null);
+  applyEvent(s,{type:'message.updated',properties:{info:{id:'m2',role:'assistant',finish:'stop',time:{completed:102}}}});
+  applyEvent(s,{type:'session.status',properties:{status:{type:'idle'}}});
+  for(const state of [s,JSON.parse(JSON.stringify(s))]){
+    assert.equal(runIssue(state),null);
+    assert.doesNotMatch(conversationHTML(state),/任务尚未完成|发送“继续”/);
+    assert.equal(state.messages[0].info.finish,'length');
+  }
+  // A late update to the old message must not poison the final state.
+  applyEvent(s,{type:'message.updated',properties:{info:{...s.messages[0].info}}});
+  assert.equal(runIssue(s),null);
+  assert.equal(s.error,undefined);
 });
 
 test('a process crash leaves an incomplete native turn, never a completed task',()=>{
@@ -352,12 +405,6 @@ test('failed or withdrawn pending sends never remain marked as waiting',async()=
  assert.match(preparationLabel({stage:'syncing'}),/同步合同/);
  });
 
-test('Skill deployment UI distinguishes saved from applied and escapes errors',async()=>{
- const {skillEnvironmentsHTML}=await import('../static/skill-environments.js');
- const html=skillEnvironmentsHTML(['applied','waiting','on_start','failed'].map(status=>({title:'合同',status,error:status==='failed'?'<script>':''})));
- assert.match(html,/已生效/);assert.match(html,/当前任务结束后生效/);assert.match(html,/环境下次启动时生效/);assert.match(html,/重试环境更新/);assert.ok(!html.includes('<script>'));
-});
-
 test('paused outbox shows an explicit send action and no duplicate pending bubble',async()=>{
  const {queueHTML,pendingRequest}=await import('../static/message-queue.js');
  const item={id:'q',status:'queued',body:{text:'新消息'}};
@@ -433,11 +480,11 @@ test('completed task list stays hidden across idle, new prompt, retry and restor
 });
 
 test('failed snapshot releases navigation and a stale failure cannot unlock a newer switch',async()=>{
-  const {readFile}=await import('node:fs/promises');const {runInNewContext}=await import('node:vm');
+  const {readFile}=await import('node:fs/promises');const {runInNewContext: runVM}=await import('node:vm');const runInNewContext=(code,context)=>runVM(code,Object.assign(context,{tr,ui,getLanguage:()=>'zh-CN',accountLanguage:async()=>{}}));
   const source=await readFile(new URL('../static/app.js',import.meta.url),'utf8');
   const restore=source.slice(source.indexOf('async function restore(view='),source.indexOf('\nfunction receive(event)'));
   let reject;const notices=[];
-  const context={epoch:1,restoring:false,switching:true,restoreEpoch:0,buffer:[],tid:'one',viewRequests:new AbortController(),updateControls(){},notice:(...args)=>notices.push(args),api:()=>new Promise((_,no)=>reject=no)};
+  const context={state:{loaded:false},$:()=>({textContent:''}),epoch:1,restoring:false,switching:true,restoreEpoch:0,buffer:[],tid:'one',esc:x=>x,viewRequests:new AbortController(),updateControls(){},notice:(...args)=>notices.push(args),api:()=>new Promise((_,no)=>reject=no)};
   runInNewContext(restore,context);
   const first=context.restore();reject(new Error('offline'));await first;
   assert.equal(context.restoring,false);assert.equal(context.switching,false);assert.match(notices[0][0],/重新加载/);
@@ -505,7 +552,7 @@ test('permission purpose is readable and technical command details stay collapse
 });
 
 test('background completion sync preserves input focus, selection and draft',async()=>{
- const {readFile}=await import('node:fs/promises'),{runInNewContext}=await import('node:vm');
+ const {readFile}=await import('node:fs/promises'),{runInNewContext: runVM}=await import('node:vm');const runInNewContext=(code,context)=>runVM(code,Object.assign(context,{tr,ui}));
  const source=await readFile(new URL('../static/app.js',import.meta.url),'utf8');
  const fn=source.slice(source.indexOf('function updateControls(){'),source.indexOf('\nasync function loadList()'));
  const nodes=new Map(),document={querySelectorAll:()=>[],activeElement:null};
@@ -524,4 +571,62 @@ test('only the current opaque report frame can request verified source navigatio
  const event={origin:'null',source,data:{type:'workbench.citation',artifactId:'report',docid:'doc',hash:'v1',block:'B1',end:'B2'}};
  assert.deepEqual(previewCitation(event,frames,docs),{docid:'doc',hash:'v1',block:'B1',end:'B2'});
  for(const change of [{source:{}},{origin:'https://evil.example'},{data:{...event.data,artifactId:'other'}},{data:{...event.data,hash:'old'}},{data:{...event.data,end:'B3'}},{data:{...event.data,type:'execute'}}])assert.equal(previewCitation({...event,...change},frames,docs),null);
+});
+
+test('entry waits only for identity and workspace; optional reads do not block the shell or retry',async()=>{
+ const {runInNewContext: runVM}=await import('node:vm');const runInNewContext=(code,context)=>runVM(code,Object.assign(context,{tr,ui,getLanguage:()=>'zh-CN',accountLanguage:async()=>{}}));
+ const source=readFileSync(new URL('../static/app.js',import.meta.url),'utf8');
+ const elements=Object.fromEntries(['authLoading','authLoadingText','authRetry','loginView','username'].map(id=>[id,{hidden:false,textContent:''}]));
+ let releaseSpace,failIdentity=false,authCalls=0,listCalls=0,wordLoads=0;const tick=()=>new Promise(resolve=>setImmediate(resolve));
+ const context={document:{body:{dataset:{}}},$:id=>elements[id],setLoadingStatus:(el,text,busy=false)=>Object.assign(el,{textContent:text,busy}),
+  setupAuth:async()=>{authCalls++;},settingsTab:()=>null,location:{pathname:'/agent',hash:'#aa'},
+  api:async()=>{if(failIdentity)throw new Error('offline');return {account_kind:'personal'};},accountIdentityHTML:()=>'',loadList:()=>{listCalls++;return new Promise(()=>{});},loadRiskSchemes:()=>new Promise(()=>{}),
+  prepareWordPreview:()=>{wordLoads++;return new Promise(()=>{});},selectWorkspace:()=>new Promise(r=>releaseSpace=r),background:task=>task.catch(()=>{}),updateControls(){},accountReady:()=>new Promise(()=>{}),notice(){},workspaces:[{id:'aa'}],URL,URLSearchParams};
+ runInNewContext(source.slice(source.indexOf('async function initialize(){')),context);
+ await tick();assert.equal(elements.authLoading.hidden,false);assert.equal(elements.authLoadingText.busy,true);assert.equal(listCalls,0);assert.equal(wordLoads,1);
+ releaseSpace();await tick();assert.equal(elements.authLoading.hidden,true);assert.equal(context.document.body.dataset.auth,'ready');assert.equal(listCalls,1);assert.equal(authCalls,0);
+ failIdentity=true;await elements.authRetry.onclick();assert.equal(elements.authLoading.hidden,false);assert.equal(elements.authLoadingText.busy,false);assert.equal(elements.authRetry.hidden,false);
+ failIdentity=false;const retry=elements.authRetry.onclick();assert.equal(elements.authLoadingText.busy,true);assert.equal(elements.authRetry.hidden,true);
+ await tick();releaseSpace();await retry;assert.equal(elements.authLoading.hidden,true);
+});
+
+test('failed login callback stops loading and offers login instead of replaying a consumed code',async()=>{
+ const {runInNewContext: runVM}=await import('node:vm');const runInNewContext=(code,context)=>runVM(code,Object.assign(context,{tr,ui,getLanguage:()=>'zh-CN',accountLanguage:async()=>{}}));
+ const source=readFileSync(new URL('../static/spaces.js',import.meta.url),'utf8');
+ const elements=Object.fromEntries(['authLoading','authLoadingText','authRetry','loginView'].map(id=>[id,{}]));let destination,attempts=0;
+ const context={document:{body:{dataset:{}}},$:id=>elements[id],setLoadingStatus:(el,text,busy=false)=>Object.assign(el,{textContent:text,busy}),
+  location:{pathname:'/auth/callback',replace:url=>destination=url},setupAuth:async()=>{},exchangeCallback:async()=>{attempts++;throw new Error('登录已过期');}};
+ runInNewContext(source.slice(source.indexOf('async function initialize(){')),context);
+ await new Promise(resolve=>setImmediate(resolve));assert.equal(elements.authLoadingText.busy,false);assert.equal(elements.authRetry.hidden,false);assert.equal(elements.authRetry.textContent,'返回登录');
+ elements.authRetry.onclick();assert.equal(destination,'/login');assert.equal(attempts,1);
+});
+
+test('both workbench and space shells include a spinner before JavaScript loads',()=>{
+ for(const name of ['index.html','spaces.html']){
+  const html=readFileSync(new URL('../static/'+name,import.meta.url),'utf8');
+  const loading=html.slice(html.indexOf('id="authLoading"'),html.indexOf('<section id="loginView"'));
+  assert.match(loading,/class="loading-spinner"/);assert.match(loading,/id="authRetry" hidden/);
+ }
+});
+
+test('compaction is collapsed process history with native contents and no synthetic user bubble',()=>{
+ const summary={info:{id:'summary',role:'assistant',summary:true,mode:'compaction',time:{completed:2},finish:'stop'},parts:[{type:'text',text:'## Goal\n- 原生目标'}]};
+ const continuation={info:{id:'continue',role:'user'},parts:[{type:'text',synthetic:true,metadata:{compaction_continue:true},text:'Continue if you have next steps, or stop and ask for clarification if you are unsure how to proceed.'}]};
+ const state={messages:[summary,continuation],status:{type:'idle'},documents:[]};
+ const html=conversationHTML(state);
+ assert.match(html,/<details class="compaction-record" data-key="compaction-summary" >/);
+ assert.match(html,/<div class="markdown"><h2>Goal<\/h2>/);
+ assert.doesNotMatch(html,/Continue if|chat-message user/);
+ assert.match(conversationHTML(state,new Set(['compaction-summary'])),/data-key="compaction-summary" open/);
+ assert.equal(summary.parts[0].text,'## Goal\n- 原生目标');
+ const running={...state,status:{type:'busy'},messages:[{...summary,info:{...summary.info,time:{created:1},finish:undefined}}]};
+ assert.equal(executionPhase(running).kind,'compaction');
+ assert.match(thinkingHTML(running),/正在压缩上下文/);
+ assert.equal(executionPhase({...running,status:{type:'idle'}}).kind,'idle');
+});
+
+test('native session title updates the current conversation',()=>{
+ const state={title:'新对话'};
+ applyEvent(state,{type:'session.updated',properties:{info:{title:'付款条款分析'}}});
+ assert.equal(state.title,'付款条款分析');
 });

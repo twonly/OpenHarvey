@@ -34,6 +34,13 @@ def register_settings(app, settings, user, runtime):
         u = user(request); admin(u)
         return settings.save_organization(u, await request.json())
 
+    @app.put('/api/settings/language')
+    async def save_language(request: Request):
+        u, body = user(request), await request.json()
+        if not isinstance(body, dict) or set(body) != {'ui_language'}:
+            raise ValueError('界面语言无效')
+        return settings.save_ui_language(u, body['ui_language'])
+
     @app.put('/api/settings/password')
     async def change_password(request: Request):
         u, body = user(request), await request.json()

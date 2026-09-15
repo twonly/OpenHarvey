@@ -4,6 +4,7 @@ No provider abstraction: only this module calls the E2B SDK. Reads of history
 never provision or resume a VM; execution explicitly calls prepare().
 """
 import asyncio
+import httpx
 import hashlib
 import json
 import os
@@ -94,6 +95,7 @@ class E2B:
 
     def secrets(self, u, wid):
         values=[os.environ.get('E2B_API_KEY')]
+        if getattr(self,'feishu',None):values.extend(self.feishu.known_secrets.get(u['id'],set()))
         for v in self.store.all('SELECT content FROM model_versions WHERE org_id=?',(self.models.scope(u),)):
             values.extend(self.models.decrypt(p['secret']) for p in json.loads(v['content']) if p.get('secret'))
         b=self.binding(wid)
@@ -116,6 +118,28 @@ class E2B:
                 'headers':{'e2b-traffic-access-token':credentials.get('traffic','')},
                 'work_root':'/workspace/threads','source_root':'/workspace/input','skill_root':'/opt/contract-runtime',
                 'local':False,'e2b':True,'submit_script':'/opt/contract-runtime/scripts/submit.py'}
+
+    async def assert_owned(self,u,wid,sbx):
+        owner=self.owner(wid)
+        if owner['id']!=u['id']:raise RuntimeError('沙箱不属于当前用户')
+        info=await sbx.get_info()
+        self.assert_metadata(info,wid,u['id'])
+        return info
+
+    async def owned_info(self,u,wid,sid):
+        from e2b import SandboxQuery,SandboxState
+        pages=self.sdk.list(query=SandboxQuery(metadata={'deployment':self.deployment},state=[SandboxState.RUNNING,SandboxState.PAUSED]))
+        rows=await pages.next_items()
+        while pages.has_next:rows+=await pages.next_items()
+        info=next((r for r in rows if r.sandbox_id==sid),None)
+        if info is None:raise RuntimeError('无法确认沙箱属于当前部署，已拒绝操作')
+        self.assert_metadata(info,wid,u['id'])
+        return info
+
+    def assert_metadata(self,info,wid,uid):
+        m=info.metadata or {}
+        if m.get('deployment')!=self.deployment or m.get('workspace_id')!=wid or m.get('user_id')!=uid:
+            raise RuntimeError('沙箱部署或用户归属不匹配，已拒绝操作')
 
     def runtime(self,u,w=None): return E2BRuntime(self,u,w)
 
@@ -143,6 +167,13 @@ class E2B:
         sbx=None
         try:
             async with self.manager.lock('e2b-create'):
+                if os.environ.get('CW_E2B_MAX_ACTIVE'):
+                    from e2b import SandboxQuery, SandboxState
+                    pages=self.sdk.list(query=SandboxQuery(metadata={'deployment':self.deployment},state=[SandboxState.RUNNING]))
+                    active=await pages.next_items()
+                    while pages.has_next:active+=await pages.next_items()
+                    if sum((x.metadata or {}).get('deployment')==self.deployment and str(x.state).lower().split('.')[-1]=='running' for x in active)>=int(os.environ['CW_E2B_MAX_ACTIVE']):
+                        raise RuntimeError('测试沙箱并发已达上限，请先暂停测试空间再验证模型')
                 await self.pace_creation()
                 sbx=await self.sdk.create(self.template,timeout=300,metadata={'deployment':self.deployment,'purpose':'model-probe'},
                     network={'allow_public_traffic':False},lifecycle={'on_timeout':'kill','auto_resume':False})
@@ -185,7 +216,11 @@ class E2B:
         except Exception as exc:
             raise RuntimeError(redact(str(exc),[os.environ.get('E2B_API_KEY'),*auth.values()])) from None
         finally:
-            if sbx:await sbx.kill()
+            if sbx:
+                info=await sbx.get_info()
+                if (info.metadata or {}).get('deployment')!=self.deployment or (info.metadata or {}).get('purpose')!='model-probe':
+                    raise RuntimeError('模型测试沙箱归属不匹配，已拒绝清理')
+                await sbx.kill()
 
     def progress(self,t,stage):
         self.record(t["workspace_id"],"preparation.stage",{"stage":stage},t["id"])
@@ -199,6 +234,7 @@ class E2B:
 
     async def prepare(self,u,t,recovering=False):
         wid=t['workspace_id']
+        if self.owner(wid)['id']!=u['id']:raise RuntimeError('合同空间不属于当前用户')
         if self.store.one('SELECT security_blocked FROM workspaces WHERE id=?',(wid,))['security_blocked']:raise RuntimeError('旧空间的共享配置已撤销，无法恢复旧沙箱，请新建空间继续')
         # Local lease and applied provider revision are sufficient for a warm VM.
         # Never wait behind background checkpoint/log extraction on this path.
@@ -209,6 +245,7 @@ class E2B:
               and prior['template']==self.template and latest and prior['revision']==latest['revision']
               and (not prior['started'] or time.time()-prior['started']<600 or self.other_active(wid,t['id'])))
         if warm and not recovering:
+            if getattr(self,'feishu',None):await self.feishu.prepare(u,{'id':wid},self.handles[wid])
             rt=self.runtime(u,{'id':wid})
             new_session=t['session_id'].startswith('pending_')
             if new_session:
@@ -230,7 +267,7 @@ class E2B:
             sbx=self.handles.get(wid); created=False
             started=time.monotonic()
             if sbx is not None:
-                info=await sbx.get_info()
+                info=await self.assert_owned(u,wid,sbx)
                 if str(info.state).lower().split('.')[-1]=='paused':
                     self.handles.pop(wid,None);self.state(wid,status='paused');sbx=None
             if sbx is not None and not recovering and not other_active and b['template']!=self.template:
@@ -248,20 +285,25 @@ class E2B:
                     pages=self.sdk.list(query=SandboxQuery(metadata={'deployment':self.deployment},state=[SandboxState.RUNNING,SandboxState.PAUSED]))
                     inventory=await pages.next_items()
                     while pages.has_next: inventory += await pages.next_items()
+                    inventory=[s for s in inventory if (s.metadata or {}).get('deployment')==self.deployment]
                     owned=[s for s in inventory if (s.metadata or {}).get('workspace_id')==wid]
+                    for item in owned:self.assert_metadata(item,wid,u['id'])
                     candidate=next((s for s in owned if s.sandbox_id==b['sandbox_id']),None)
                     if not candidate and owned and not b['sandbox_id']:
                         candidate=sorted(owned,key=lambda s:s.sandbox_id)[0]
                     if candidate:
                         self.progress(t,'resuming')
+                        limit=int(os.environ.get('CW_E2B_MAX_ACTIVE','16'))
+                        if str(candidate.state).lower().split('.')[-1]=='paused' and sum(str(s.state).lower().split('.')[-1]=='running' for s in inventory)>=limit:raise RuntimeError('测试沙箱并发已达上限，请先暂停其他测试空间')
                         sbx=await self.sdk.connect(candidate.sandbox_id,timeout=TTL)
+                        await self.assert_owned(u,wid,sbx)
                         if str(candidate.state).lower().split('.')[-1]=='paused':self.state(wid,started=time.time())
                         self.record(wid,'sandbox.connect',{'duration_ms':round((time.monotonic()-started)*1000)})
                     else:
                         if b['sandbox_id']:
                             self.record(wid,'sandbox.lost',{'sandbox_id':b['sandbox_id'],'recovery':'latest checkpoint'})
-                        if sum(str(s.state).lower().split('.')[-1]=='running' for s in inventory)>=16:
-                            raise RuntimeError('E2B 活动环境已达 16 个，请等待其他任务完成')
+                        if sum(str(s.state).lower().split('.')[-1]=='running' for s in inventory)>=int(os.environ.get('CW_E2B_MAX_ACTIVE','16')):
+                            raise RuntimeError('E2B 测试活动环境已达配置上限，请先暂停其他测试空间')
                         credentials=json.loads(self.models.decrypt(b['credentials'])) if b['credentials'] else {'password':secrets.token_urlsafe(32)}
                         # Persist password before create, so a crash between create and bind is recoverable.
                         self.state(wid,credentials=self.models.encrypt(encoded(credentials)),status='creating')
@@ -275,7 +317,7 @@ class E2B:
                         self.file_stats={k:v for k,v in self.file_stats.items() if k[0]!=wid}
                         self.permission_cache={k:v for k,v in self.permission_cache.items() if k[0]!=wid}
                         self.path_cache={k:v for k,v in self.path_cache.items() if k[0]!=wid}
-                        self.state(wid,generation=b['generation']+1,started=time.time(),template=self.template)
+                        self.state(wid,generation=b['generation']+1,started=time.time(),template=self.template,revision=0)
                         self.store.execute('DELETE FROM e2b_files WHERE workspace_id=?',(wid,))
                         self.record(wid,'sandbox.create',{'duration_ms':round((time.monotonic()-started)*1000)})
                     credentials=json.loads(self.models.decrypt(self.binding(wid)['credentials']))
@@ -301,6 +343,7 @@ class E2B:
             self.progress(t,'syncing')
             await self.skill_sync.apply(u,w,sbx,exclude_tid=t['id'],force=booted)
             await self.sync_files(u,t,sbx)
+            if getattr(self,'feishu',None):await self.feishu.prepare(u,w,sbx)
             await self.ensure_session(rt,t)
             self.unhealthy.discard(wid)
             self.state(wid,status='ready',revision=latest['revision'],last_activity=time.time(),error=None)
@@ -316,8 +359,22 @@ class E2B:
         try: return bool((await asyncio.wait_for(Runtime.call(rt,'GET','/global/health'),3)).get('healthy'))
         except (RuntimeError,asyncio.TimeoutError): return False
 
+    async def bootstrap_request(self,wid,rt,method,path,body=None):
+        # Only idempotent startup configuration. Never retry session creation,
+        # Agent prompts, permission replies or external business writes here.
+        allowed=(method in {'PUT','DELETE'} and path.startswith('/auth/')) or (method=='POST' and path=='/global/dispose')
+        if not allowed:raise ValueError('非幂等启动请求不可自动重试')
+        for attempt in range(3):
+            try:return await Runtime.call(rt,method,path,body=body)
+            except RuntimeError as exc:
+                if not isinstance(exc.__cause__,httpx.TransportError) or attempt==2:raise
+                self.record(wid,'opencode.bootstrap.retry',{'attempt':attempt+1,'cause':type(exc.__cause__).__name__})
+                await asyncio.sleep(.3*(attempt+1))
+
     async def boot(self,u,w,sbx,native,auth):
         wid=w['id'];begin=time.monotonic()
+        applied_revision=self.binding(wid)['revision']
+        self.state(wid,status='starting',revision=0)
         self.permission_cache={k:v for k,v in self.permission_cache.items() if k[0]!=wid}
         self.path_cache={k:v for k,v in self.path_cache.items() if k[0]!=wid}
         await sbx.commands.run('mkdir -p /workspace/threads /workspace/input /workspace/output /workspace/published /workspace/exchange /opt/contract-runtime /var/lib/contract-opencode /var/log/contract-opencode && chown -R user:user /workspace /opt/contract-runtime /var/lib/contract-opencode /var/log/contract-opencode',user='root')
@@ -332,16 +389,20 @@ class E2B:
         config={**runtime_config(Path('/opt/contract-runtime')),**native}
         config=json.loads(encoded(config).replace('publish.py','submit.py'))
         from .skill_sync import PATHS
-        config['skills']={'paths':PATHS}
+        from .feishu_direct import enabled as direct_enabled
+        config['skills']={'paths':PATHS+(['/opt/feishu/skills'] if direct_enabled() else [])}
         uploads.append({'path':'/var/lib/contract-opencode/opencode.json','data':encoded(config)})
         await sbx.files.write_files(uploads)
+        if direct_enabled():
+            await sbx.commands.run('chmod 755 /opt/contract-runtime/scripts/feishu_cli.py && ln -sf /opt/contract-runtime/scripts/feishu_cli.py /usr/local/bin/lark-cli',user='root')
         self.record(wid,'opencode.files.ready',{'elapsed_ms':round((time.monotonic()-begin)*1000)})
         rt=self.runtime(u,w)
         env={'XDG_DATA_HOME':'/var/lib/contract-opencode/data','XDG_CONFIG_HOME':'/var/lib/contract-opencode/config',
              'XDG_STATE_HOME':'/var/lib/contract-opencode/state','XDG_CACHE_HOME':'/var/lib/contract-opencode/cache',
              'OPENCODE_CONFIG':'/var/lib/contract-opencode/opencode.json','OPENCODE_SERVER_PASSWORD':rt.config['password'],
              'OPENCODE_DISABLE_CLAUDE_CODE':'true','OPENCODE_DISABLE_EXTERNAL_SKILLS':'true','OPENCODE_ENABLE_QUESTION_TOOL':'true',
-             'OPENCODE_ENABLE_EXA':'true','OPENCODE_WEBSEARCH_PROVIDER':'exa'}
+             'OPENCODE_ENABLE_EXA':'true','OPENCODE_WEBSEARCH_PROVIDER':'exa',
+             'OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX':'384000'}
         # Dedicated PID file, never broad pkill. Only used at idle turn boundaries.
         await sbx.commands.run("if test -f /var/lib/contract-opencode/service.pid; then kill $(cat /var/lib/contract-opencode/service.pid) 2>/dev/null || true; fi")
         await sbx.commands.run("echo $$ > /var/lib/contract-opencode/service.pid; exec opencode --print-logs serve --pure --hostname 0.0.0.0 --port 4096 >> /var/log/contract-opencode/service.log 2>&1",envs=env,cwd='/workspace/threads',background=True,timeout=0)
@@ -353,11 +414,17 @@ class E2B:
         else: raise RuntimeError('E2B OpenCode 启动健康检查超时')
         self.record(wid,'opencode.health.ready',{'elapsed_ms':round((time.monotonic()-begin)*1000)})
         prior=self.binding(wid)
-        previous=self.models.native(self.models.snapshot(self.models.scope(u),prior['revision']))[1] if prior['revision'] else {}
-        for pid in set(previous)-set(auth):await Runtime.call(rt,'DELETE','/auth/'+pid)
-        for pid,key in auth.items():
-            if key: await Runtime.call(rt,'PUT','/auth/'+pid,body={'type':'api','key':key})
-        await Runtime.call(rt,'POST','/global/dispose')
+        previous=self.models.native(self.models.snapshot(self.models.scope(u),applied_revision))[1] if applied_revision else {}
+        for pid in set(previous)-set(auth):await self.bootstrap_request(wid,rt,'DELETE','/auth/'+pid)
+        phase='provider_auth'
+        try:
+            for pid,key in auth.items():
+                if key: await self.bootstrap_request(wid,rt,'PUT','/auth/'+pid,body={'type':'api','key':key})
+            phase='dispose'
+            await self.bootstrap_request(wid,rt,'POST','/global/dispose')
+        except RuntimeError as exc:
+            self.record(wid,'opencode.boot.failed',{'phase':phase,'cause':type(exc.__cause__).__name__})
+            raise
         self.record(wid,'opencode.ready',{'duration_ms':round((time.monotonic()-begin)*1000)})
 
     async def sync_files(self,u,t,sbx=None):
@@ -470,6 +537,7 @@ class E2B:
     def _ingest_event(self,u,t,event):
         p=event.get('properties',{});kind=event.get('type')
         owner=p.get('sessionID') or p.get('info',{}).get('sessionID') or p.get('part',{}).get('sessionID')
+        if kind=='session.updated':owner=p.get('info',{}).get('id')
         if owner!=t['session_id']:return
         messages,snap=self.history(t['id'])
         if kind=='message.updated':
@@ -486,6 +554,7 @@ class E2B:
             part=next((part for m in messages if m['info']['id']==p['messageID'] for part in m['parts'] if part['id']==p['partID']),None)
             if not part or part.get('type')!='text' or p.get('field')!='text':return
             part['text']=part.get('text','')+p['delta']
+        elif kind=='session.updated':snap['info']=p['info']
         elif kind=='session.status':snap['status']=p['status']
         elif kind=='todo.updated':snap['todos']=p['todos']
         elif kind in {'question.asked','permission.asked'}:
@@ -519,6 +588,7 @@ class E2B:
             finally:self.stream_ready[t['id']].clear()
 
     async def collect_submissions(self,u,w,sbx):
+        if getattr(self,'feishu',None):await self.feishu.collect(u,w,sbx)
         entries=await sbx.files.list('/workspace/exchange',depth=1)
         for entry in entries:
             if not entry.name.endswith('.request.json'):continue
@@ -577,6 +647,7 @@ class E2B:
     async def pause(self,u,w):
         wid=w['id'];sbx=self.handles.get(wid)
         if not sbx:return
+        await self.assert_owned(u,wid,sbx)
         self.state(wid,status='pausing')
         await sbx.set_timeout(TTL)
         await self.collect_submissions(u,w,sbx)
@@ -585,14 +656,20 @@ class E2B:
         streams=[self.streams.pop(t['id']) for t in self.store.all('SELECT id FROM threads WHERE workspace_id=?',(wid,)) if t['id'] in self.streams]
         for task in streams:task.cancel()
         await asyncio.gather(*streams,return_exceptions=True)
-        self.handles.pop(wid,None);self.state(wid,status='paused');self.record(wid,'sandbox.pause')
+        self.handles.pop(wid,None)
+        if getattr(self,'feishu',None):self.feishu.applied.pop(wid,None)
+        self.state(wid,status='paused');self.record(wid,'sandbox.pause')
 
     async def destroy(self,u,w):
         wid=w['id'];b=self.binding(wid)
         if not b or not b['sandbox_id']:return
+        if self.owner(wid)['id']!=u['id']:raise RuntimeError('沙箱不属于当前用户')
+        info=await self.owned_info(u,wid,b['sandbox_id'])
+        if info:self.assert_metadata(info,wid,u['id'])
         if wid not in self.handles and b['status'] not in {'lost','killed','recovery_failed'}:
             # Explicit destruction first flushes a paused VM's last state.
             sbx=await self.sdk.connect(b['sandbox_id'],timeout=TTL)
+            await self.assert_owned(u,wid,sbx)
             credentials=json.loads(self.models.decrypt(b['credentials']))
             credentials.update(url='https://'+sbx.get_host(4096),traffic=sbx.traffic_access_token)
             self.state(wid,credentials=self.models.encrypt(encoded(credentials)))
@@ -600,6 +677,8 @@ class E2B:
             for t in self.store.all('SELECT * FROM threads WHERE workspace_id=?',(wid,)):
                 await self.collect_thread(u,t)
         if wid in self.handles:await self.pause(u,w)
+        info=await self.owned_info(u,wid,b['sandbox_id'])
+        if info:self.assert_metadata(info,wid,u['id'])
         await self.sdk.kill(b['sandbox_id'])
         self.handles.pop(wid,None);self.state(wid,status='killed',sandbox_id=None)
         self.record(wid,'sandbox.kill')
@@ -617,17 +696,12 @@ class E2B:
                         w=self.store.one('SELECT * FROM workspaces WHERE id=?',(wid,));b=self.binding(wid)
                         for t in threads:
                             if not t['session_id'].startswith('pending_'):self.watch(u,t)
+                        if getattr(self,'feishu',None):await self.feishu.prepare(u,w,sbx)
                         await self.collect_submissions(u,w,sbx)
                         # Waiting in one dialogue must not stop renewal for another.
                         snapshots={t['id']:self.snapshot(t['id']) for t in threads}
                         for t in threads:
                             snap=snapshots[t['id']]
-                            active_turn=self.store.one("SELECT created FROM execution_configs WHERE thread_id=? AND status IN ('starting','running') ORDER BY created DESC LIMIT 1",(t['id'],))
-                            limit=2700 if u['role']=='admin' else self.settings.accounts.limits()['run_seconds']
-                            if snap.get('status',{}).get('type','idle')!='idle' and active_turn and time.time()-active_turn['created']>limit:
-                                await Runtime.call(self.runtime(u,w),'POST',f'/session/{t["session_id"]}/abort',tid=t['id'])
-                                self.record(wid,'execution.timeout',{'limit_seconds':limit},t['id'])
-                                snap['status']={'type':'idle'}
                         runnable=any(s.get('status',{}).get('type','idle')!='idle' and not (s.get('questions') or s.get('permissions')) for s in snapshots.values())
                         active=self.store.one("SELECT MIN(e.created) AS created FROM execution_configs e JOIN threads t ON t.id=e.thread_id WHERE t.workspace_id=? AND e.status IN ('starting','running')",(wid,))
                         dispatching=self.store.one("SELECT 1 FROM queued_messages q JOIN threads t ON t.id=q.thread_id WHERE t.workspace_id=? AND q.status='dispatching'",(wid,))
@@ -672,10 +746,13 @@ class E2B:
         items=await pages.next_items()
         while pages.has_next:items+=await pages.next_items()
         ids={s.sandbox_id for s in items}
+        items=[s for s in items if (s.metadata or {}).get('deployment')==self.deployment]
+        ids={s.sandbox_id for s in items}
         for item in items:
             wid=(item.metadata or {}).get('workspace_id')
             if not wid:continue
             w=self.store.one('SELECT * FROM workspaces WHERE id=?',(wid,));b=self.binding(wid)
+            if w:self.assert_metadata(item,wid,w['user_id'])
             age=time.time()-item.started_at.timestamp()
             if not w or (b and b['sandbox_id'] and b['sandbox_id']!=item.sandbox_id):
                 # Creation and reconciliation share a lock; allow ten minutes
@@ -684,9 +761,11 @@ class E2B:
                 continue
             if not b or not b['credentials']:continue
             state=str(item.state).lower().split('.')[-1]
-            self.state(wid,sandbox_id=item.sandbox_id,status=b['status'] if b['status']=='recovery_failed' else 'paused' if state=='paused' else 'ready')
+            self.state(wid,sandbox_id=item.sandbox_id,status=b['status'] if b['status']=='recovery_failed' else 'paused' if state=='paused' else 'ready' if b['revision'] else 'starting')
             if state=='running' and wid not in self.handles:
                 sbx=await self.sdk.connect(item.sandbox_id,timeout=TTL)
+                await self.assert_owned(self.owner(wid),wid,sbx)
+                if getattr(self,'feishu',None):await self.feishu.prepare(self.owner(wid),w,sbx,force=True)
                 creds=json.loads(self.models.decrypt(b['credentials']))
                 if sbx.traffic_access_token:creds['traffic']=sbx.traffic_access_token
                 creds['url']='https://'+sbx.get_host(4096)
@@ -807,6 +886,10 @@ class E2BRuntime(Runtime):
         for rule in rules:rule['pattern']=rule['pattern'].replace('publish.py','submit.py')
         rules += [{**rule,'pattern':rule['pattern'].replace('python3 ','python ',1)}
                   for rule in rules if rule['permission']=='bash' and rule['pattern'].startswith('python3 ')]
+        from .feishu_direct import enabled as direct_enabled
+        if direct_enabled() and mode=='auto':
+            for pattern in ['lark-cli *','LARKSUITE_CLI_NO_UPDATE_NOTIFIER=1 lark-cli *','LARKSUITE_CLI_NO_UPDATE_NOTIFIER=1 LARKSUITE_CLI_NO_SKILLS_NOTIFIER=1 lark-cli *']:
+                rules.append({'permission':'bash','pattern':pattern,'action':'allow'})
         for perm in ['read','external_directory']:
             rules.append({'permission':perm,'pattern':'/workspace/published/*' if perm=='external_directory' else 'workspace/published/*','action':'allow'})
         return rules
@@ -825,6 +908,10 @@ class E2BRuntime(Runtime):
                 continue
             synced=stamp
             messages,snap=await asyncio.to_thread(self.e2b.history,t['id'])
+            info=snap.get('info',{})
+            if info.get('id')==t['session_id'] and seen.get('session-title')!=info.get('title'):
+                seen['session-title']=info.get('title')
+                yield {'type':'session.updated','properties':{'info':info}}
             for m in messages:
                 info=m['info'];key=info['id'];stamp=encoded(info)
                 if seen.get(key)!=stamp:

@@ -1,3 +1,4 @@
+import {t as tr,ui} from './i18n.js';
 import {esc} from './markdown.js';
 
 export function queueHTML(queue,models=[]){
@@ -6,8 +7,8 @@ export function queueHTML(queue,models=[]){
   const failed=items.some(i=>i.status==='failed');
   const uncertain=items.some(i=>i.status==='failed'&&i.stage==='submitting');
   const modelName=id=>models.find(m=>m.id===id)?.label||id?.split('/').at(-1)||'';
-  const reason=uncertain?'有消息的提交结果尚未确认，请先检查对话，再决定是否重发。':failed?'有消息未能发送，请查看原因并撤回编辑。':'';
-  return `<div class="queue-heading"><b>待发送 · ${items.length}</b><span>${queue.paused?'':'依次发送'}</span>${queue.paused&&!failed?`<button type="button" data-queue-resume>发送</button>`:''}</div>${reason?`<p class="queue-reason">${esc(reason)}</p>`:''}<ol>${items.map((item,i)=>`<li><div class="queue-item-copy"><span class="queue-position">${i+1} · ${item.status==='failed'?(item.stage==='submitting'?'提交结果待确认':'未能发送'):queue.paused?'尚未发送':'等待当前任务结束'}</span><small class="queue-model">${esc(item.body.model?'模型：'+modelName(item.body.model):'')}${item.body.skill?' · /'+esc(item.body.skill):''}</small><p>${esc(item.body.text)}</p>${item.error?`<p class="queue-error">${esc(item.error)}</p>`:''}</div><button type="button" data-withdraw-message="${esc(item.id)}">撤回并重新编辑</button></li>`).join('')}</ol>`;
+  const reason=uncertain?tr('有消息的提交结果尚未确认，请先检查对话，再决定是否重发。'):failed?tr('有消息未能发送，请查看原因并撤回编辑。'):'';
+  return ui`<div class="queue-heading"><b>待发送 · ${items.length}</b><span>${queue.paused?'':tr('依次发送')}</span>${queue.paused&&!failed?ui`<button type="button" data-queue-resume>发送</button>`:''}</div>${reason?`<p class="queue-reason">${esc(reason)}</p>`:''}<ol>${items.map((item,i)=>ui`<li><div class="queue-item-copy"><span class="queue-position">${i+1} · ${item.status==='failed'?(item.stage==='submitting'?tr('提交结果待确认'):tr('未能发送')):queue.paused?tr('尚未发送'):tr('等待当前任务结束')}</span><small class="queue-model">${esc(item.body.model?tr('模型：')+modelName(item.body.model):'')}${item.body.skill?' · /'+esc(item.body.skill):''}</small><p>${esc(item.body.text)}</p>${item.error?`<p class="queue-error">${esc(item.error)}</p>`:''}</div><button type="button" data-withdraw-message="${esc(item.id)}">撤回并重新编辑</button></li>`).join('')}</ol>`;
 }
 
 export function restoreDraft(recovered,current,saved=[]){
@@ -42,8 +43,8 @@ export function reconcilePending(state){
 }
 
 export function preparationLabel(item){
-  const stage=({checking:'检查环境',creating:'创建环境',resuming:'恢复环境',starting:'启动 Agent',syncing:'同步合同和配置',connecting:'建立连接',submitting:'提交请求'})[item?.stage]||'准备环境';
-  return `连接 Agent 环境中...(${stage})`;
+  const stage=({checking:tr('检查环境'),creating:tr('创建环境'),resuming:tr('恢复环境'),starting:tr('启动 Agent'),syncing:tr('同步合同和配置'),connecting:tr('建立连接'),submitting:tr('提交请求')})[item?.stage]||tr('准备环境');
+  return ui`连接 Agent 环境中...(${stage})`;
 }
 
 export function loadingStateHTML(label){

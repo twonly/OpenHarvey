@@ -1,4 +1,6 @@
+import {t as tr,ui} from './i18n.js';
 import {esc} from './markdown.js';
+import {loadingHTML} from './loading-ui.js';
 const $=id=>document.getElementById(id);
 
 export function setupArtifactStrip(){
@@ -45,6 +47,19 @@ export function setupArtifactStrip(){
 }
 
 export function setupReading(){
+  const sourceHost=$('sourceContent');
+  sourceHost.addEventListener('load',event=>{
+    if(event.target.matches('.pdf-page img'))event.target.closest('.pdf-page').querySelector('.pdf-page-loading').hidden=true;
+  },true);
+  sourceHost.addEventListener('error',event=>{
+    if(event.target.matches('.pdf-page img'))event.target.closest('.pdf-page').querySelector('.pdf-page-loading').innerHTML=tr('<p>此页加载失败。<button data-retry-page>重新加载</button></p>');
+  },true);
+  sourceHost.addEventListener('click',event=>{
+    if(!event.target.closest('[data-retry-page]'))return;
+    const page=event.target.closest('.pdf-page'),img=page.querySelector('img'),url=img.currentSrc||img.src;
+    page.querySelector('.pdf-page-loading').innerHTML=loadingHTML(tr('正在加载页面…'));
+    img.removeAttribute('srcset');img.src=url;
+  });
   const pane=$('contextPane');let mode='stacked';
   const hidden=new Set();
   const visible=name=>{
@@ -52,11 +67,16 @@ export function setupReading(){
     return rect.width>0&&rect.height>0;
   };
   const sync=()=>{
-    for(const name of ['source','artifact'])$(name==='source'?'toggleSource':'toggleArtifact').setAttribute('aria-expanded',String(visible(name)));
+    for(const name of ['source','artifact']){
+      const button=$(name==='source'?'toggleSource':'toggleArtifact'),shown=visible(name);
+      button.setAttribute('aria-expanded',String(shown));
+      button.title=tr(name==='source'?(shown?'隐藏合同原文':'显示合同原文'):(shown?'隐藏产出物':'显示产出物'));
+    }
   };
-  const setPane=(name,visible)=>{
+  const setPane=(name,visible,preserveLayout=false)=>{
     if(visible)hidden.delete(name);else hidden.add(name);
-    if(mode!=='stacked')apply('stacked');
+    if(preserveLayout){if(mode==='artifact'&&name==='source')apply('compare');}
+    else if(mode!=='stacked')apply('stacked');
     pane.dataset.sourceHidden=String(hidden.has('source'));
     pane.dataset.artifactHidden=String(hidden.has('artifact'));
     document.querySelector('main').classList.toggle('context-closed',hidden.size===2);
@@ -64,7 +84,7 @@ export function setupReading(){
     for(const key of ['source','artifact']){
       const button=$(key==='source'?'toggleSource':'toggleArtifact');
       button.setAttribute('aria-expanded',String(!hidden.has(key)));
-      button.title=(hidden.has(key)?'显示':'隐藏')+(key==='source'?'合同原文':'产出物');
+      button.title=tr(key==='source'?(hidden.has(key)?'显示合同原文':'隐藏合同原文'):(hidden.has(key)?'显示产出物':'隐藏产出物'));
     }
   };
   const apply=value=>{
@@ -77,7 +97,7 @@ export function setupReading(){
     mode=value;pane.dataset.layout=mode;
     document.body.classList.toggle('reading-wide',mode!=='stacked');
     document.querySelectorAll('button[data-layout]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.layout===mode)));
-    document.querySelectorAll('.pane-expand').forEach(b=>{const label=b.dataset.layout===mode?'还原工作区':b.dataset.layout==='source'?'放大合同文档':'放大产出物';b.setAttribute('aria-label',label);b.title=label;});
+    document.querySelectorAll('.pane-expand').forEach(b=>{const label=b.dataset.layout===mode?tr('还原工作区'):b.dataset.layout==='source'?tr('放大合同文档'):tr('放大产出物');b.setAttribute('aria-label',label);b.title=label;});
     $('contextSplit').setAttribute('aria-orientation',mode==='compare'?'vertical':'horizontal');
     document.querySelectorAll('.document-more').forEach(menu=>menu.open=false);
     requestAnimationFrame(()=>positions.forEach(({el,scroll,anchor,offset})=>{
@@ -93,6 +113,7 @@ export function setupReading(){
   const observer=new MutationObserver(sync);
   for(const target of [document.body,document.querySelector('main'),pane])observer.observe(target,{attributes:true,attributeFilter:['class','data-layout','data-source-hidden','data-artifact-hidden']});
   window.addEventListener('resize',sync);requestAnimationFrame(sync);
+  document.addEventListener('ui-language-changed',sync);
   document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!e.defaultPrevented&&mode!=='stacked'){e.preventDefault();apply('stacked');}});
   document.addEventListener('click',e=>{document.querySelectorAll('.document-more').forEach(menu=>{if(!menu.contains(e.target))menu.open=false;});});
   document.querySelectorAll('.document-more').forEach(menu=>menu.addEventListener('keydown',e=>{if(e.key==='Escape'&&mode==='stacked'){menu.open=false;menu.querySelector('summary').focus();e.preventDefault();}}));
@@ -103,12 +124,12 @@ export function setupReading(){
   split.onpointermove=e=>{if(!drag)return;const rect=pane.getBoundingClientRect();change(sideBySide()?(e.clientX-rect.left)/rect.width*100:(e.clientY-$('docPane').getBoundingClientRect().top)/pane.clientHeight*100);};
   const stop=()=>{drag=false;document.body.classList.remove('resizing');};split.onpointerup=stop;split.onpointercancel=stop;
   split.onkeydown=e=>{if(!['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Home'].includes(e.key))return;e.preventDefault();const axis=sideBySide()?'width':'height',current=parseFloat(pane.style.getPropertyValue('--source-'+axis))||50;change(e.key==='Home'?50:current+(['ArrowDown','ArrowRight'].includes(e.key)?3:-3));};
-  return {showSource(){setPane('source',true);},showArtifact(){setPane('artifact',true);apply('artifact');},reset(){apply('stacked');}};
+  return {showSource(){setPane('source',true,true);},showArtifact(){setPane('artifact',true);apply('artifact');},reset(){apply('stacked');}};
 }
 
 export function pdfMarkup(doc,tid){
   const pages=new Map();for(const seg of doc.segments){if(!pages.has(seg.page))pages.set(seg.page,[]);pages.get(seg.page).push(seg);}
-  return doc.pages.map((p,i)=>`<div class="pdf-page" data-page="${i+1}" style="aspect-ratio:${p.w}/${p.h}"><img loading="lazy" draggable="false" src="/api/documents/${doc.id}/pages/${i+1}${tid?'?thread_id='+tid:''}" alt="第 ${i+1} 页"><div class="pdf-text-layer">${(pages.get(i+1)||[]).filter(s=>s.bbox).map(s=>{const b=s.bbox;return `<span data-block="${s.id}" data-font-height="${(b[3]-b[1])/p.w}" style="left:${b[0]/p.w*100}%;top:${b[1]/p.h*100}%;width:${(b[2]-b[0])/p.w*100}%;height:${(b[3]-b[1])/p.h*100}%"><span>${esc(s.text)}</span></span>`;}).join('')}</div></div>`).join('');
+  return doc.pages.map((p,i)=>ui`<div class="pdf-page" data-page="${i+1}" style="aspect-ratio:${p.w}/${p.h}"><div class="pdf-page-loading">${loadingHTML(tr("正在加载第 ")+(i+1)+tr(" 页…"))}</div><img loading="lazy" draggable="false" src="/api/documents/${doc.id}/pages/${i+1}?width=960${tid?'&thread_id='+encodeURIComponent(tid):''}" srcset="${[960,1920,2880].map(width=>`/api/documents/${doc.id}/pages/${i+1}?width=${width}${tid?'&thread_id='+encodeURIComponent(tid):''} ${width}w`).join(', ')}" sizes="auto, (max-width: 950px) 100vw, 950px" decoding="async" alt="第 ${i+1} 页"><div class="pdf-text-layer">${(pages.get(i+1)||[]).filter(s=>s.bbox).map(s=>{const b=s.bbox;return `<span data-block="${s.id}" data-font-height="${(b[3]-b[1])/p.w}" style="left:${b[0]/p.w*100}%;top:${b[1]/p.h*100}%;width:${(b[2]-b[0])/p.w*100}%;height:${(b[3]-b[1])/p.h*100}%"><span>${esc(s.text)}</span></span>`;}).join('')}</div></div>`).join('');
 }
 
 export function fitPdfText(host){
@@ -119,6 +140,8 @@ export function fitPdfText(host){
   for(const [page,width] of pages){
     if(!width||Number(page.dataset.textWidth)===width)continue;
     page.dataset.textWidth=String(width);
+    // Let the browser pick physical pixels for this panel width and screen DPR.
+    const image=page.querySelector('img');if(image)image.sizes=`auto, ${width}px`;
     for(const line of page.querySelectorAll('.pdf-text-layer>[data-block]')){
       const font=Number(line.dataset.fontHeight)*width,text=line.firstElementChild;
       ctx.font=`${font}px sans-serif`;text.style.fontSize=font+'px';
@@ -129,7 +152,7 @@ export function fitPdfText(host){
 
 export function setupQuotes(context,onChange,onError,onAdd=()=>{}){
   let quotes=[],selection=null;const host=$('sourceContent'),toolbar=$('sourceSelectionToolbar');
-  const render=()=>{$('sourceQuoteTray').innerHTML=quotes.map((q,i)=>`<div class="quote-chip"><button data-quote-open="${i}"><b>${esc(q.filename)} · 已圈选</b><span>${esc(q.text)}</span></button><button data-quote-remove="${i}" aria-label="移除原文引用">×</button></div>`).join('');onChange(quotes);};
+  const render=()=>{$('sourceQuoteTray').innerHTML=quotes.map((q,i)=>ui`<div class="quote-chip"><button data-quote-open="${i}"><b>${esc(q.filename)} · 已圈选</b><span>${esc(q.text)}</span></button><button data-quote-remove="${i}" aria-label="移除原文引用">×</button></div>`).join('');onChange(quotes);};
   const hide=()=>{selection=null;toolbar.hidden=true;};
   document.addEventListener('selectionchange',()=>{
     const selected=window.getSelection(),{source,tid}=context();
@@ -150,7 +173,7 @@ export function setupQuotes(context,onChange,onError,onAdd=()=>{}){
     toolbar.style.left=Math.max(8,Math.min(innerWidth-170,rect.left))+'px';toolbar.style.top=Math.max(8,Math.min(innerHeight-50,rect.bottom+6))+'px';
   });
   $('addSourceQuote').onpointerdown=e=>e.preventDefault();
-  $('addSourceQuote').onclick=()=>{if(!selection||selection.tid!==context().tid)return;if(quotes.length>=5)return onError('每条消息最多引用 5 处原文。');if(selection.text.length>10000)return onError('圈选内容过长，请选择 10000 字以内的条款。');quotes.push(selection);render();hide();window.getSelection()?.removeAllRanges();document.body.classList.remove('context-mobile');onAdd();$('input').focus();};
+  $('addSourceQuote').onclick=()=>{if(!selection||selection.tid!==context().tid)return;if(quotes.length>=5)return onError(tr('每条消息最多引用 5 处原文。'));if(selection.text.length>10000)return onError(tr('圈选内容过长，请选择 10000 字以内的条款。'));quotes.push(selection);render();hide();window.getSelection()?.removeAllRanges();document.body.classList.remove('context-mobile');onAdd();$('input').focus();};
   $('sourceQuoteTray').onclick=e=>{const remove=e.target.closest('[data-quote-remove]');if(remove){quotes.splice(Number(remove.dataset.quoteRemove),1);render();}};
   return {get:()=>quotes,set:items=>{quotes=items||[];render();hide();},removeDocument:id=>{quotes=quotes.filter(q=>q.document_id!==id);render();},hide};
 }

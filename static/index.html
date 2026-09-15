@@ -2,18 +2,19 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<script src="/static/locale-boot.js"></script><style>html[lang=en] [data-initial-locale="zh-CN"],html:not([lang=en]) [data-initial-locale="en"]{display:none}</style>
 <title>OpenHarvey</title>
 <link rel="icon" href="/static/brand/openharvey.svg">
 <link rel="stylesheet" href="/static/workbench.css">
-<link rel="stylesheet" href="/static/app.css?v=20260912-21">
+<link rel="stylesheet" href="/static/app.css?v=20260914-progressive-1">
 <link rel="stylesheet" href="/static/risk-ui.css?v=20260911-10">
-<link rel="stylesheet" href="/static/agent-ui.css?v=20260913-2">
-<link rel="stylesheet" href="/static/settings-ui.css?v=20260912-7">
-<link rel="stylesheet" href="/static/account-ui.css?v=20260913-header-2">
+<link rel="stylesheet" href="/static/agent-ui.css?v=20260915-runtime-1">
+<link rel="stylesheet" href="/static/settings-ui.css?v=20260914-settings-1">
+<link rel="stylesheet" href="/static/account-ui.css?v=20260914-loading-all">
 <link rel="stylesheet" href="/static/workspace-controls.css?v=20260913-5">
-</head>
+<script defer src="/static/site-telemetry.js?v=20260914-1"></script><link rel="stylesheet" href="/static/i18n.css?v=20260914-1"><script type="module" src="/static/language-ui.js"></script></head>
 <body data-auth="loading">
-<div id="authLoading" class="auth-loading" role="status"><p id="authLoadingText">正在打开工作台…</p><button id="authRetry" hidden>重新连接</button></div>
+<div id="authLoading" class="auth-loading" role="status"><p id="authLoadingText" class="loading-status" aria-busy="true"><span class="loading-spinner" aria-hidden="true"></span><span data-no-i18n><span data-initial-locale="zh-CN">正在打开工作台…</span><span data-initial-locale="en">Opening workspace…</span></span></p><button id="authRetry" hidden>重新连接</button></div>
 <div id="loginView" class="login-view" hidden>
   <form id="loginForm" class="login-card">
     <img src="/static/brand/openharvey.svg" width="44" height="44" alt="">
@@ -28,7 +29,7 @@
   <div class="brand-lockup"><img src="/static/brand/openharvey.svg" width="28" height="28" alt=""><h1>OpenHarvey</h1></div>
   <details id="workspaceSwitcher" class="workspace-switcher"><summary><span>我的合同</span><b id="fname">选择合同</b><span aria-hidden="true">⌄</span></summary><div class="workspace-menu"><label class="workspace-search"><span>切换合同</span><input id="workspaceSearch" placeholder="搜索合同…" aria-label="搜索我的合同" autocomplete="off"></label><div id="workspaceList"></div><button id="uploadButton" class="new-contract">＋ 上传新合同</button></div></details>
   <a href="/spaces" id="spacesLink" class="shell-toggle">合同空间</a>
-  <nav><span id="username"></span><button id="openSettings" class="shell-toggle">设置</button><button id="logout" class="shell-toggle">退出</button></nav>
+  <nav><span id="username"></span><button id="openSettings" class="shell-toggle">设置</button><button id="logout" hidden class="shell-toggle">退出</button></nav>
   <button id="toggleRail" class="shell-toggle panel-toggle" aria-controls="workspaceRail" aria-expanded="true"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M8 4v16"/><path class="panel-arrow" d="m15 9-3 3 3 3"/></svg><span>工作区</span></button>
 <button id="toggleSource" class="shell-toggle panel-toggle" aria-controls="docPane" aria-expanded="true">合同原文</button><button id="toggleArtifact" class="shell-toggle panel-toggle" aria-controls="artPane" aria-expanded="true">产出物</button>
 </header>
@@ -55,9 +56,9 @@
         <div id="savedDrafts" class="saved-drafts" hidden></div>
         
         <div id="sourceQuoteTray"></div>
-        <div class="composer-options"><div class="quick-actions" id="skillActions" aria-label="可用 Skills"></div><label class="risk-scheme-picker"><span>审查方案</span><select id="riskSchemeSelect" aria-label="本次审查方案" disabled></select></label></div>
+        <div class="composer-options"><div class="quick-actions" id="skillActions" aria-label="可用 Skills"></div><label class="risk-scheme-picker"><span>审查方案</span><select id="riskSchemeSelect" aria-label="本次审查方案" disabled></select></label><button id="riskSchemeRetry" type="button" hidden>重试方案</button></div>
         <div class="prompt-card"><div id="skillPicker" role="listbox" aria-label="选择 Skill" hidden></div><div id="selectedSkill" hidden></div><textarea id="input" aria-label="合同问题或任务指令" aria-controls="skillPicker" aria-expanded="false" rows="3" placeholder="询问条款、圈选原文提问，或输入 / 选择 Skill…" disabled></textarea>
-          <div class="prompt-actions"><button id="attachButton" class="shell-toggle" disabled>＋ 附件</button><label class="model-picker"><span>模型</span><select id="modelSelect" aria-label="选择对话模型" title="用于下一条消息，选择仅为当前对话保存" disabled></select></label><label class="permission-picker"><select id="permissionMode" aria-label="执行权限模式" title="全权执行：当前合同空间的云端沙箱内自动执行工具操作；常规执行：额外命令需确认；谨慎执行：写入和命令需确认。选择会记入账号默认设置，新会话继承。" disabled><option value="full">全权执行</option><option value="auto">常规执行</option><option value="cautious">谨慎执行</option></select><span id="permissionLoading" class="permission-loading" role="status" aria-label="正在更新执行权限" hidden></span></label><button id="stopButton" type="button" title="取消当前任务，并暂停后续排队消息" hidden><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="5" y="5" width="14" height="14" rx="2"/></svg><span>取消任务</span></button><button id="sendBtn" type="button" aria-label="发送给 Agent" disabled><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></svg><span id="sendLabel" hidden>排队</span></button></div>
+          <div class="prompt-actions"><button id="attachButton" class="shell-toggle" disabled>＋ 附件</button><label class="model-picker"><span>模型</span><select id="modelSelect" aria-label="选择对话模型" title="用于下一条消息，选择仅为当前对话保存" disabled></select></label><button id="modelRetry" type="button" hidden>重试模型</button><label class="permission-picker"><select id="permissionMode" aria-label="执行权限模式" title="全权执行：当前合同空间的云端沙箱内自动执行工具操作；常规执行：额外命令需确认；谨慎执行：写入和命令需确认。选择会记入账号默认设置，新会话继承。" disabled><option value="full">全权执行</option><option value="auto">常规执行</option><option value="cautious">谨慎执行</option></select><span id="permissionLoading" class="permission-loading" role="status" aria-label="正在更新执行权限" hidden></span></label><button id="stopButton" type="button" title="取消当前任务，并暂停后续排队消息" hidden><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="5" y="5" width="14" height="14" rx="2"/></svg><span>取消任务</span></button><button id="sendBtn" type="button" aria-label="发送给 Agent" disabled><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></svg><span id="sendLabel" hidden>排队</span></button></div>
         </div><span class="prompt-hint">Enter 发送 · Shift+Enter 换行 · 可在对话中指定我方立场</span>
       </div>
     </section>
@@ -102,8 +103,6 @@
 <dialog id="deleteThreadDialog"><form method="dialog"><h3>删除这段对话？</h3><p>对话将移入“最近删除”，可随时恢复。附件、产出物和执行记录会保留。</p><div class="dialog-actions"><button value="cancel">取消</button><button value="delete" class="confirm-delete">移入最近删除</button></div></form></dialog>
 <input type="file" id="attachmentInput" accept=".docx,.pdf,.md,.txt" hidden>
 <div id="sourceSelectionToolbar" hidden><button id="addSourceQuote">引用原文到对话 ↵</button></div>
-<script src="/static/vendor/jszip-3.10.1.min.js"></script>
-<script src="/static/vendor/docx-preview-0.3.6.min.js"></script>
-<script type="module" src="/static/app.js?v=20260913-header-2"></script>
+<script type="module" src="/static/app.js?v=20260915-runtime-1"></script>
 </body>
 </html>

@@ -6,6 +6,16 @@ from contract_web.runtime import visible_event
 
 
 class CitationProcessingTests(unittest.TestCase):
+    def test_native_compaction_markers_survive_public_projection_without_other_metadata(self):
+        view=PublicView()
+        part={'id':'p','type':'text','text':'Continue if you have next steps, or stop and ask for clarification if you are unsure how to proceed.',
+              'synthetic':True,'metadata':{'compaction_continue':True,'private':'hidden'}}
+        public=view.part(part)
+        self.assertTrue(public['synthetic'])
+        self.assertEqual(public['metadata'],{'compaction_continue':True})
+        self.assertEqual(public['text'],part['text'])
+        self.assertEqual(view.part({'id':'q','type':'text','text':'normal','metadata':None})['text'],'normal')
+
     def test_adjacent_overlap_duplicate_and_idempotence(self):
         d='aaaaaaaaaaaa'
         text='依据：'+marker(d,935)+marker(d,936)+' '+marker(d,937)+marker(d,938)+marker(d,938)

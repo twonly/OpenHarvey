@@ -4,6 +4,7 @@ import io
 import json
 import secrets
 import tempfile
+import threading
 import unittest
 from unittest.mock import patch
 from pathlib import Path
@@ -108,6 +109,7 @@ class WorkbenchTests(unittest.TestCase):
 
     def tearDown(self):
         self.client.close()
+        self.app.state.outlines.close()
         self.tmp.cleanup()
 
     def login(self, name):
@@ -129,7 +131,10 @@ class WorkbenchTests(unittest.TestCase):
         attached = self.client.post(f'/api/threads/{t["id"]}/attachments', content=file.getvalue(),
                                     headers={**self.headers, 'X-Filename': 'terms.docx'}).json()
         docid = attached['id']
+        outline_url = f'/api/documents/{docid}/outline?thread_id={t["id"]}'
+        self.wait_outline(outline_url)
         path = self.store.user_root(self.uid)/'sources'/docid/'document.json'
+        (path.parent/'outline.json').unlink()
         mapping = json.loads(path.read_text());mapping.pop('outline')
         for segment in mapping['segments']:
             segment.pop('outline_level', None)
@@ -137,12 +142,54 @@ class WorkbenchTests(unittest.TestCase):
         url = f'/api/documents/{docid}?thread_id={t["id"]}'
         response = self.client.get(url)
         self.assertEqual(response.status_code, 200, response.text)
-        self.assertEqual(response.json()['outline']['entries'][0]['block_id'], 'B0')
+        self.assertEqual(self.wait_outline(outline_url)['entries'][0]['block_id'], 'B0')
         self.assertEqual(response.json()['segments'], mapping['segments'])
         self.assertEqual(path.read_bytes(), before)
         other = self.client.post(f'/api/workspaces/{w["id"]}/threads', json={}, headers=self.headers).json()
         self.assertEqual(self.client.get(f'/api/documents/{docid}?thread_id={other["id"]}').status_code, 404)
         self.login('bob');self.assertEqual(self.client.get(url).status_code, 404)
+        self.assertEqual(self.client.get(outline_url).status_code, 404)
+
+    def wait_outline(self, url):
+        for _ in range(100):
+            response = self.client.get(url)
+            self.assertEqual(response.status_code, 200, response.text)
+            outline = response.json()['outline']
+            if outline.get('status') != 'pending':
+                return outline
+            time.sleep(.01)
+        self.fail('Background outline did not finish')
+
+    def test_outline_does_not_block_upload_or_read_and_is_deduplicated(self):
+        from contract_web.document_outline import document_outline
+        started, release = threading.Event(), threading.Event()
+        def delayed(path, mapped):
+            started.set()
+            release.wait(5)
+            return document_outline(path, mapped)
+        with patch('contract_web.outline_jobs.document_outline', side_effect=delayed) as extract:
+            try:
+                response = self.client.post('/api/workspaces', content=b'# Payment\nNet 30',
+                    headers={**self.headers, 'X-Filename': 'terms.md'})
+                self.assertEqual(response.status_code, 200, response.text)
+                self.assertTrue(started.wait(1))
+                docid = response.json()['document_id'];url = f'/api/documents/{docid}'
+                first = self.client.get(url).json()
+                self.assertEqual(first['outline']['status'], 'pending')
+                self.assertTrue(first['segments'])
+                for _ in range(3):
+                    self.assertEqual(self.client.get(url+'/outline').json()['outline']['status'], 'pending')
+                self.assertEqual(extract.call_count, 1)
+            finally:
+                release.set()
+            result = self.wait_outline(url+'/outline')
+            self.assertEqual(result['entries'][0]['title'], 'Payment')
+            path = self.store.user_root(self.uid)/'sources'/docid
+            self.assertEqual(json.loads((path/'document.json').read_text())['outline']['status'], 'pending')
+            self.assertEqual(self.client.get(url).json()['outline'], result)
+            self.assertEqual(extract.call_count, 1)
+            self.login('bob')
+            self.assertEqual(self.client.get(url+'/outline').status_code, 404)
 
     def send(self, t, text="合同价款是多少？", **kwargs):
         return self.client.post(f'/api/threads/{t["id"]}/messages', json={"text": text, **kwargs}, headers=self.headers)

@@ -13,6 +13,8 @@ from fastapi import HTTPException,Request
 from fastapi.responses import JSONResponse,RedirectResponse
 from .settings import admin,encoded
 from .store import digest
+from .session_policy import session_seconds
+from .trial_models import public_trial_models
 
 COOKIE='contract_session'
 FLOW_COOKIE='workbench_auth_flow'
@@ -43,7 +45,10 @@ def register_auth(app,accounts,models,manager,user):
     def cookie(response,name,value,age=86400):
         response.set_cookie(name,value,httponly=True,secure=os.environ.get('CW_SECURE_COOKIE')=='1',samesite='lax' if name==FLOW_COOKIE else 'strict',max_age=age)
         return response
-    def issue(u,seconds=86400):return cookie(JSONResponse({'ok':True,'user':accounts.public(u)}),COOKIE,accounts.login(u,seconds),seconds)
+    def issue(u,seconds=None):
+        seconds = session_seconds() if seconds is None else seconds
+        seconds = min(seconds, max(1, int(u['expires_at']-time.time()))) if u.get('expires_at') else seconds
+        return cookie(JSONResponse({'ok':True,'user':accounts.public(u)}),COOKIE,accounts.login(u,seconds),seconds)
     def client_id(request):
         # Railway's edge overwrites X-Real-IP; do not trust arbitrary forwarding chains.
         host=request.headers.get('x-real-ip') if os.environ.get('RAILWAY_ENVIRONMENT_ID') else None
@@ -76,23 +81,40 @@ def register_auth(app,accounts,models,manager,user):
         u=store.one('SELECT * FROM users WHERE id=?',(f['user_id'],)) if f['user_id'] else None
         async with lock:bound=accounts.bind(verified,u,f['kind'].endswith(':link'))
         ensure_trial(bound)
-        response=issue(bound,min(86400,max(60,int(identity.get('expires_in',3600)))));response.delete_cookie(FLOW_COOKIE);return response
+        # Supabase verifies identity once; its access-token TTL is not the
+        # lifetime of our independent, revocable browser session.
+        response=issue(bound);response.delete_cookie(FLOW_COOKIE);return response
 
     def ensure_trial(u):
-        if u['role']=='admin' or not os.environ.get('CW_TRIAL_MODEL_KEY'):return
+        catalog=public_trial_models()
+        if u['role']=='admin' or not catalog:return
         old=store.one("SELECT * FROM providers WHERE org_id=? AND id='trial'",(models.scope(u),))
-        if old and store.one('SELECT 1 FROM trial_tokens WHERE user_id=? AND expires>?',(u['id'],time.time())):return
-        token=secrets.token_urlsafe(40);expiry=time.time()+86400*365
-        model=os.environ.get('CW_TRIAL_MODEL','glm-5.3');base=os.environ.get('CW_PUBLIC_ORIGIN','').rstrip('/')
+        valid=old and store.one('SELECT 1 FROM trial_tokens WHERE user_id=? AND expires>?',(u['id'],time.time()))
+        base=os.environ.get('CW_PUBLIC_ORIGIN','').rstrip('/')
         if not base:raise HTTPException(503,'平台试用地址尚未配置')
-        store.execute('INSERT INTO trial_tokens VALUES(?,?,?)',(digest(token),u['id'],expiry))
-        result=models.save(u,{'id':'trial','label':'平台试用模型','base_url':base+'/trial-model/v1','key':token,'enabled':True,'models':[{'id':model,'label':'平台试用模型','context':128000,'output':8192,'enabled':True,'native':json.loads(os.environ.get('CW_TRIAL_MODEL_NATIVE','{}'))}],'revision':old['revision'] if old else 0})
+        payload={'id':'trial','label':'平台试用模型','base_url':base+'/trial-model/v1','enabled':True,'models':catalog,'revision':old['revision'] if old else 0}
+        payload['models']=models.validate(payload)['models']
+        # Rename only platform selections; preserve native history and executed snapshots.
+        if any(m['id']=='glm-5.3-flash' for m in catalog):
+            previous,current='trial/glm-5.3','trial/glm-5.3-flash'
+            with store.connect() as db:
+                db.execute('UPDATE users SET model=? WHERE id=? AND model=?',(current,u['id'],previous))
+                db.execute("UPDATE users SET preferences=json_set(preferences,'$.model',?) WHERE id=? AND json_extract(preferences,'$.model')=?",(current,u['id'],previous))
+                db.execute('UPDATE threads SET model=? WHERE workspace_id IN (SELECT id FROM workspaces WHERE user_id=?) AND model=?',(current,u['id'],previous))
+                db.execute("UPDATE queued_messages SET body=json_set(body,'$.model',?) WHERE user_id=? AND status IN ('queued','failed') AND json_extract(body,'$.model')=?",(current,u['id'],previous))
+            u.update(store.one('SELECT * FROM users WHERE id=?',(u['id'],)))
+        if valid and json.loads(old['models'])==payload['models'] and old['base_url']==payload['base_url']:return
+        if not valid:
+            token=secrets.token_urlsafe(40)
+            store.execute('INSERT INTO trial_tokens VALUES(?,?,?)',(digest(token),u['id'],time.time()+86400*365))
+            payload['key']=token
+        result=models.save(u,payload)
         store.execute('UPDATE model_versions SET validated=1 WHERE org_id=? AND revision=?',(models.scope(u),result['revision']))
     app.state.ensure_trial=ensure_trial
 
     @app.get('/api/auth/config')
     async def auth_config():
-        return {'enabled':bool(os.environ.get('CW_SUPABASE_URL') and os.environ.get('CW_SUPABASE_PUBLISHABLE_KEY')),'demo_enabled':bool(os.environ.get('CW_TRIAL_MODEL_KEY')),'captcha_site_key':os.environ.get('CW_TURNSTILE_SITE_KEY'),'providers':['github','google','email']}
+        return {'enabled':bool(os.environ.get('CW_SUPABASE_URL') and os.environ.get('CW_SUPABASE_PUBLISHABLE_KEY')),'demo_enabled':bool(public_trial_models()),'captcha_site_key':os.environ.get('CW_TURNSTILE_SITE_KEY'),'providers':['github','google','email']}
 
     @app.post('/api/auth/start')
     async def start(request:Request):
@@ -129,7 +151,7 @@ def register_auth(app,accounts,models,manager,user):
         if existing:return JSONResponse({'ok':True,'user':accounts.public(accounts.fresh(existing))})
         claimed=store.one("SELECT u.* FROM demo_claims d JOIN users u ON u.id=d.user_id WHERE d.token=? AND d.expires>? AND u.active=1 AND u.account_kind='demo' AND u.expires_at>?",(digest(request.cookies.get(DEMO_COOKIE,'')),time.time(),time.time()))
         if claimed:return issue(claimed)
-        if not os.environ.get('CW_TRIAL_MODEL_KEY'):raise HTTPException(503,'免登录试用尚未开放，请登录后使用')
+        if not public_trial_models():raise HTTPException(503,'免登录试用尚未开放，请登录后使用')
         key='demo:'+client_id(request);row=store.one('SELECT count,expires FROM auth_rates WHERE bucket=?',(key,))
         if row and row['expires']>time.time() and row['count']>=3:
             body=await request.json();secret=os.environ.get('CW_TURNSTILE_SECRET_KEY')

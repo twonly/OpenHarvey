@@ -10,6 +10,7 @@ import yaml
 from fastapi import HTTPException
 
 DEFAULTS = {"model": None, "perspective": "乙方", "permission_mode": "auto", "verbosity": "normal", "assistant_name":"合同助手", "user_nickname":"", "onboarding_completed":False, "background":"", "guidance":""}
+DEFAULTS['ui_language'] = 'zh-CN'
 
 
 def encoded(value):
@@ -85,6 +86,8 @@ class Settings:
         if not isinstance(values, dict) or set(values) - set(DEFAULTS):
             raise ValueError('设置字段无效')
         for key, value in values.items():
+            if key == 'ui_language' and (not isinstance(value, str) or value not in {'zh-CN', 'en'}):
+                raise ValueError('界面语言无效')
             if key in {'assistant_name','user_nickname'} and (not isinstance(value,str) or len(value)>32 or any(ord(c)<32 for c in value)):
                 raise ValueError('称呼最多32字，不能包含换行或控制字符')
             if key=='assistant_name' and not value.strip():raise ValueError('请填写助手名称')
@@ -103,6 +106,9 @@ class Settings:
     def save_preferences(self, u, body):
         values = self.validate_preferences(body.get('values'))
         with self.store.connect() as db:
+            prior = json.loads(db.execute('SELECT preferences FROM users WHERE id=?', (u['id'],)).fetchone()['preferences'])
+            if 'ui_language' not in values and 'ui_language' in prior:
+                values = {**values, 'ui_language': prior['ui_language']}
             changed = db.execute('UPDATE users SET preferences=?,model=?,settings_revision=settings_revision+1 WHERE id=? AND settings_revision=?',
                                  (encoded(values), values.get('model'), u['id'], body.get('revision'))).rowcount
             if not changed:
@@ -111,6 +117,13 @@ class Settings:
 
     def save_organization(self, u, body):
         raise HTTPException(410,'组织设置已取消，请使用个人设置')
+
+    def save_ui_language(self, u, value):
+        self.validate_preferences({'ui_language': value})
+        # A field-only update cannot overwrite concurrent model/name changes.
+        self.store.execute("UPDATE users SET preferences=json_set(preferences,'$.ui_language',?),settings_revision=settings_revision+1 WHERE id=?",
+                           (value, u['id']))
+        return {'ui_language': value}
 
     def builtins(self, u=None):
         result = []

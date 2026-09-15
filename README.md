@@ -15,7 +15,7 @@ OpenHarvey connects source documents, conversations and saved deliverables. It i
 - **Native agents.** OpenCode handles tools, Skills, sessions and permissions. The application adds document context, navigation, persistence and delivery receipts.
 - **Sandbox execution.** Cloud mode runs agents in E2B. Application permissions govern account and document access. Self-hosting the web application does not automatically replace external sandbox or model services.
 
-The website supports Chinese and English. **The application UI, built-in examples and some report fields are primarily Chinese in v0.1.0.** Full English UI and English-contract evaluation are on the roadmap.
+The website and workspace interface support Chinese and English. Existing documents, examples and generated reports retain their original language. English-contract quality requires separate evaluation.
 
 ## Five product highlights
 
@@ -80,6 +80,20 @@ export CW_SECURE_COOKIE=0
 For persistent use, replace the temporary `CW_DATA_DIR` with a stable directory **outside the checkout**. Open `/spaces`, use the locally provisioned administrator login and configure a model in Settings → Models and services. Model and sandbox use may incur provider charges. A successful web health check is not proof of a working model or sandbox.
 
 See [deployment instructions](docs/deployment.md) for explicit local runtime setup and E2B cloud deployment. Email/OAuth registration requires your own Supabase project; local administrator login does not.
+
+## Feishu / Lark: company knowledge and business updates
+
+Choose Feishu or Lark in **Connectors**, then create the app and authorize your account through the official website. No access-token copying is required. App permissions, publication and organization approval still apply.
+
+- **Channel contract review:** find sales policies and compare payment terms, authorization scope and rebates with the contract’s direct or channel sales context, citing actual sources.
+- **Tender preparation:** combine tender requirements with accessible product and delivery knowledge to prepare response points, gaps and clarification lists; save a shared document when requested.
+- **Risk reports and contract registers:** create a report and return its real link; read Base fields before creating or updating the specified records.
+- **Collaboration:** with additional contact-search and messaging consent, find recipients and send messages as the user only when explicitly requested.
+
+The control plane manages per-account credentials and refresh. OpenCode calls the official CLI directly from each E2B sandbox. Only access tokens enter the owning sandbox; app secrets and refresh tokens remain on the control plane. Feishu document and Base workflows have live end-to-end evidence; Lark international and messaging still require live-account acceptance. A dedicated CRM connector is not included.
+
+[Setup, permissions and deployment](docs/feishu-lark.md)
+
 
 ## Architecture
 

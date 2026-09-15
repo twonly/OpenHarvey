@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow"><title>运营看板 · OpenHarvey</title><link rel="icon" href="/static/brand/openharvey.svg" type="image/svg+xml"><link rel="stylesheet" href="/static/ops.css?v=20260913-ops-1"><link rel="stylesheet" href="/static/i18n.css?v=20260914-1"><script type="module" src="/static/language-ui.js"></script></head>
+<body>
+<a class="skip" href="#main">跳到内容</a>
+<aside class="sidebar"><a class="brand" href="/spaces"><img src="/static/brand/openharvey.svg" alt="" width="29" height="29">OpenHarvey</a><div class="private-label"><span aria-hidden="true">◈</span> 私人运营看板</div><nav aria-label="运营看板">
+<a href="/ops?view=overview" data-view="overview"><span>◫</span>运营总览</a><a href="/ops?view=users" data-view="users"><span>♧</span>用户与使用</a><a href="/ops?view=runs" data-view="runs"><span>≋</span>任务与交付</a><a href="/ops?view=contracts" data-view="contracts"><span>▤</span>合同与风险</a><a href="/ops?view=models" data-view="models"><span>◇</span>模型与消耗</a><a href="/ops?view=runtime" data-view="runtime"><span>⌁</span>运行状况</a>
+</nav><div class="sidebar-bottom"><span class="live-dot"></span> 仅所有者可见<p>从真实使用中，<br>看清产品的下一步。</p><a href="/spaces">← 返回合同工作台</a></div></aside>
+<main id="main" tabindex="-1">
+<header class="page-header"><div><p class="eyebrow">OPENHARVEY / OPERATIONS</p><h1 id="pageTitle">运营总览</h1><p id="pageDescription">使用、交付与运行，集中在一处。</p></div><div class="header-actions"><label class="sr-only" for="period">日期范围</label><select id="period"><option value="today">今日</option><option value="7" selected>最近 7 天</option><option value="30">最近 30 天</option><option value="custom">自定义日期</option></select><button id="refresh">↻ 刷新</button></div></header>
+<form id="filters" class="filters"><div id="customDates" hidden><label>起始<input id="start" type="date" required></label><label>结束<input id="end" type="date" required></label></div><label>账号类型<select id="accountKind"><option value="">全部类型</option><option value="demo">Demo 试用</option><option value="personal">个人账号</option></select></label><label>用户<select id="userId"><option value="">全部用户</option></select></label><label class="check"><input id="excludeOwner" type="checkbox" checked>排除本人</label><button type="submit">应用筛选</button><span id="updateTime" class="update-time">正在读取…</span></form>
+<div id="notice" role="status" hidden></div>
+<div id="scopeNote" class="scope-note">北京时间 · 当前保留记录 · 可能包含测试记录</div>
+<div id="localFilters" class="local-filters" hidden><label>搜索<input id="search" type="search" placeholder="用户或合同名称"></label><label id="modelFilter">模型<select id="model"><option value="">全部模型</option></select></label><label id="statusFilter">执行状态<select id="status"><option value="">全部状态</option><option value="completed">正常完成</option><option value="failed">失败</option><option value="interrupted">中断</option><option value="running">运行中</option></select></label><label>排序<select id="sort"><option value="created">时间</option><option value="username">用户</option></select></label><label>顺序<select id="order"><option value="desc">降序</option><option value="asc">升序</option></select></label><button id="searchButton">筛选</button><a id="export" class="button" href="#">导出 CSV</a></div>
+<section id="content" aria-live="polite" aria-busy="true"><div class="loading"><div class="skeleton"></div><div class="skeleton"></div><div class="skeleton"></div><p>正在读取已保存的运营数据…</p></div></section>
+<footer><span>OpenHarvey · 私人运营视图</span><details><summary>数据口径与覆盖范围</summary><div id="definitions"></div></details></footer>
+</main>
+<dialog id="drawer" aria-labelledby="drawerTitle"><div class="drawer-head"><h2 id="drawerTitle">详情</h2><button id="closeDrawer" aria-label="关闭详情">×</button></div><div id="drawerBody"></div></dialog>
+<script type="module" src="/static/ops.js?v=20260913-ops-1"></script>
+</body></html>

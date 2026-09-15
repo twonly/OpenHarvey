@@ -1,0 +1,11 @@
+.language-picker{display:inline-flex;align-items:center;gap:5px;font-size:12px;position:relative;flex-shrink:0}
+.language-picker select{font:inherit;color:inherit;background:transparent;border:1px solid #cbd5cd;border-radius:7px;padding:6px;max-width:115px;cursor:pointer}
+.language-picker .language-error{position:absolute;top:100%;right:0;width:220px;background:#fff;color:#9f3427;z-index:20}
+.language-picker .language-error:empty{display:none}
+body:has(#settingsView:not([hidden]))>header .language-picker{display:none}
+.auth-panel>.language-picker{align-self:flex-end;margin-bottom:16px;order:-1}
+html[lang=en] .prompt-actions{flex-wrap:wrap}
+html[lang=en] .settings-fields label,html[lang=en] .settings-nav button{overflow-wrap:anywhere}
+html[lang=en] .risk-filters{flex-wrap:wrap}
+html[lang=en] .settings-nav{min-width:190px}
+@media(max-width:760px){html[lang=en] header nav{flex-wrap:wrap}.language-picker>span:first-child{display:none}}

@@ -8,6 +8,7 @@ import time
 from contextlib import contextmanager
 from pathlib import Path
 from .settings import migrate
+from .session_policy import session_seconds
 
 
 def digest(value):
@@ -149,12 +150,32 @@ class Store:
             return None
         token = secrets.token_urlsafe(32)
         self.execute("DELETE FROM logins WHERE expires < ?", (time.time(),))
-        self.execute("INSERT INTO logins VALUES(?,?,?)", (digest(token), user["id"], time.time()+86400))
+        self.execute("INSERT INTO logins VALUES(?,?,?)", (digest(token), user["id"], time.time()+session_seconds()))
         return token
 
     def authenticate(self, token):
         return self.one("SELECT u.id,u.username,u.model,u.org_id,u.role,u.account_kind,u.expires_at,u.auth_subject FROM users u JOIN logins l ON l.user_id=u.id "
                         "WHERE l.token=? AND l.expires>? AND u.active=1 AND (u.expires_at IS NULL OR u.expires_at>?)", (digest(token), time.time(), time.time()))
+
+    def login_failure_reason(self, token):
+        if not token:return 'cookie_missing'
+        row=self.one("SELECT l.expires,u.active,u.expires_at FROM logins l JOIN users u ON u.id=l.user_id WHERE l.token=?", (digest(token),))
+        if not row:return 'credential_unknown_or_revoked'
+        if not row['active']:return 'account_disabled'
+        now=time.time()
+        if row['expires_at'] is not None and row['expires_at']<=now:return 'account_expired'
+        if row['expires']<=now:return 'login_expired'
+        return 'state_changed'
+
+    def renew_login(self, token):
+        # Never resurrect expired/revoked sessions or extend demo account lifetime.
+        now = time.time()
+        row = self.one("SELECT l.expires,u.expires_at FROM logins l JOIN users u ON u.id=l.user_id WHERE l.token=? AND l.expires>? AND u.active=1 AND (u.expires_at IS NULL OR u.expires_at>?)", (digest(token), now, now))
+        if not row:return None
+        expires = min(now + session_seconds(), row['expires_at'] or float('inf'))
+        if expires - row['expires'] < min(3600, session_seconds() / 2):return None
+        self.execute("UPDATE logins SET expires=? WHERE token=? AND expires>?", (expires, digest(token), now))
+        return max(1, int(expires-now))
 
     def runtime(self, username):
         configs = json.loads((self.root / "runtimes.json").read_text())

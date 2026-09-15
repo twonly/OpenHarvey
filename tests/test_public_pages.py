@@ -31,6 +31,7 @@ class PublicPageTests(unittest.TestCase):
         from contract_web.product_showcase import FEATURES
         body=self.client.get('/guide').text
         self.assertIn('id="highlights"',body)
+        self.assertNotIn('查看 Skills 页的合同环境状态',body)
         for feature in FEATURES:
             path='/static/product/'+feature['image']
             self.assertIn(path,body)

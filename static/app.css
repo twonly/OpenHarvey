@@ -79,6 +79,7 @@ body.reading-wide #appShell{grid-template-columns:minmax(0,1fr)!important}body.r
 .pdf-text-layer ::highlight(source-search-current){background-color:#60a5fa38;color:transparent}
 .search-current-fallback{background:#dbeafe!important;outline:1px solid #76a4e8}
 .pdf-page{overflow:hidden}
+.pdf-page-loading{position:absolute;inset:0;display:flex;align-items:flex-start;justify-content:center;padding-top:48px;background:#fff;z-index:1;color:var(--muted);font-size:13px}.pdf-page-loading[hidden]{display:none}
 @container(max-width:599px){#sourceOutline{position:absolute;inset:0 auto 0 0;width:230px;max-width:80%;z-index:4;box-shadow:5px 0 18px #172b3b18}}
 .composer-options{display:flex;align-items:center;gap:12px;flex-wrap:wrap}.composer-options .quick-actions{flex:1}.risk-scheme-picker{display:flex;align-items:center;gap:6px;max-width:100%;font-size:11px;color:#8390a0}.risk-scheme-picker select{background:transparent;border:0;color:#62738b;font:inherit;max-width:190px;cursor:pointer}
 

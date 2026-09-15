@@ -30,6 +30,10 @@ def outlined_pdf(action=False):
     ]
     if action:
         objects[9] = objects[9].replace(b'/Dest [4 0 R /Fit]', b'/A << /S /GoTo /D [4 0 R /Fit] >>')
+    return pdf_objects(objects)
+
+
+def pdf_objects(objects):
     data = b'%PDF-1.4\n';offsets = [0]
     for number, obj in enumerate(objects, 1):
         offsets.append(len(data));data += f'{number} 0 obj\n'.encode() + obj + b'\nendobj\n'
@@ -39,7 +43,40 @@ def outlined_pdf(action=False):
     return data + f'trailer\n<< /Size {len(offsets)} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n'.encode()
 
 
+def linked_pdf(toc=True):
+    stream = (b'BT /F1 12 Tf 40 740 Td (' + (b'Contents' if toc else b'Related references') +
+              b') Tj 0 -30 Td (1 Payment terms .... 1) Tj 0 -25 Td (1.1 Delivery .... 2) Tj ET')
+    body = b'BT /F1 12 Tf 40 740 Td (Delivery and acceptance terms.) Tj ET'
+    return pdf_objects([
+        b'<< /Type /Catalog /Pages 2 0 R >>',
+        b'<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>',
+        b'<< /Type /Page /Parent 2 0 R /MediaBox [0 0 600 800] /Resources << /Font << /F1 5 0 R >> >> /Contents 6 0 R /Annots [8 0 R 9 0 R 10 0 R 11 0 R 12 0 R] >>',
+        b'<< /Type /Page /Parent 2 0 R /MediaBox [0 0 600 800] /Resources << /Font << /F1 5 0 R >> >> /Contents 7 0 R >>',
+        b'<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
+        b'<< /Length '+str(len(stream)).encode()+b' >>\nstream\n'+stream+b'\nendstream',
+        b'<< /Length '+str(len(body)).encode()+b' >>\nstream\n'+body+b'\nendstream',
+        b'<< /Type /Annot /Subtype /Link /Rect [40 706 210 722] /Dest [4 0 R /Fit] >>',
+        # Duplicate annotation for the same row.
+        b'<< /Type /Annot /Subtype /Link /Rect [40 706 210 722] /A << /S /GoTo /D [4 0 R /Fit] >> >>',
+        # Only the final page number is clickable: recover its row title.
+        b'<< /Type /Annot /Subtype /Link /Rect [126 681 137 697] /A << /S /GoTo /D [4 0 R /Fit] >> >>',
+        b'<< /Type /Annot /Subtype /Link /Rect [40 736 210 752] /A << /S /URI /URI (https://example.com) >> >>',
+        b'<< /Type /Annot /Subtype /Link /Rect [40 736 210 752] /A << /S /GoToR /F (external.pdf) /D [0 /Fit] >> >>',
+    ])
+
+
 class DocumentOutlineTests(unittest.TestCase):
+    def test_printed_toc_links_deduplicate_and_use_actual_destinations(self):
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root)/'source.pdf';path.write_bytes(linked_pdf())
+            self.assertEqual(read_pdf_outline(path), [])
+            self.assertEqual(prepare(path, 'aaaaaaaaaaaa')['outline'], {
+                'source': 'pdf-toc-links', 'entries': [
+                    {'title': '1 Payment terms', 'level': 1, 'page': 2},
+                    {'title': '1.1 Delivery', 'level': 2, 'page': 2}]})
+            path.write_bytes(linked_pdf(toc=False))
+            self.assertEqual(prepare(path, 'aaaaaaaaaaaa')['outline']['entries'], [])
+
     def test_word_native_inherited_headings_body_override_and_legacy_maps(self):
         with tempfile.TemporaryDirectory() as root:
             path = Path(root)/'source.docx';doc = Document()

@@ -58,7 +58,8 @@ class SkillSync:
             for t in self.store.all('SELECT * FROM threads WHERE workspace_id=?',(w['id'],)):
                 wd=self.store.user_root(u['id'])/'threads'/t['id'];wd.mkdir(parents=True,exist_ok=True)
                 p=wd/'opencode.json';config=json.loads(p.read_text()) if p.exists() else {}
-                config['skills']={'paths':PATHS};p.write_text(encoded(config))
+                from .feishu_direct import enabled as direct_enabled
+                config['skills']={'paths':PATHS+(['/opt/feishu/skills'] if direct_enabled() else [])};p.write_text(encoded(config))
                 remote=self.e.runtime(u,w).directory(t['id'])+'/opencode.json'
                 await sbx.files.write(remote,encoded(config))
                 if not t['session_id'].startswith('pending_'):

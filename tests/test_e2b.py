@@ -146,6 +146,22 @@ class E2BTests(unittest.TestCase):
         s['status']={'type':'idle'}
         self.run_async(self.cloud.collect_thread(self.u,t))
 
+    def test_failed_boot_invalidates_model_revision_before_recovery(self):
+        from contract_web.runtime import RuntimeError as RuntimeFailure
+        w,t=self.make_workspace();self.send(t);self.finish(w,t);t=self.current(t)
+        sbx=self.sandbox(w);latest,native,auth=self.cloud.catalog(self.u)
+        original=Runtime.call
+        async def fail_auth(rt,method,path,**kw):
+            if method=='PUT' and path.startswith('/auth/'):
+                raise RuntimeFailure('connection interrupted') from httpx.ReadError('closed')
+            return await original(rt,method,path,**kw)
+        with patch.object(Runtime,'call',fail_auth):
+            with self.assertRaises(RuntimeFailure):self.run_async(self.cloud.boot(self.u,w,sbx,native,auth))
+        self.assertEqual(self.cloud.binding(w['id'])['revision'],0)
+        self.run_async(self.cloud.prepare(self.u,t))
+        self.assertEqual(self.cloud.binding(w['id'])['revision'],latest['revision'])
+        self.assertEqual(self.cloud.binding(w['id'])['status'],'ready')
+
     def test_full_execution_is_remembered_without_starting_a_sandbox(self):
         w,t=self.make_workspace()
         result=self.client.put('/api/threads/'+t['id']+'/permission-mode',json={'mode':'full'},headers=self.headers)
@@ -201,6 +217,9 @@ class E2BTests(unittest.TestCase):
     def test_native_sse_updates_text_directly_and_filters_other_sessions(self):
         w,t=self.make_workspace();self.send(t);t=self.current(t);sid=t['session_id']
         def emit(kind,properties):self.cloud.ingest_event(self.u,t,{'type':kind,'properties':properties})
+        emit('session.updated',{'info':{'id':sid,'title':'付款条款分析'}})
+        emit('session.updated',{'info':{'id':'other','title':'不属于本对话'}})
+        self.assertEqual(self.cloud.snapshot(t['id'])['info']['title'],'付款条款分析')
         emit('message.updated',{'info':{'id':'streamed','sessionID':sid,'role':'assistant','time':{'created':1}}})
         emit('message.part.updated',{'part':{'id':'text1','messageID':'streamed','sessionID':sid,'type':'text','text':'金额'}})
         emit('message.part.delta',{'sessionID':sid,'messageID':'streamed','partID':'text1','field':'text','delta':'128000元'})
@@ -375,18 +394,19 @@ class E2BTests(unittest.TestCase):
         self.run_async(check())
         self.assertEqual(self.cloud.history(t2['id'])[1]['questions'],[])
 
-    def test_timeout_aborts_only_the_overdue_dialogue(self):
+    def test_long_running_dialogues_continue_without_wall_clock_abort(self):
         w,t=self.make_workspace();self.send(t)
         t2=self.client.post('/api/workspaces/'+w['id']+'/threads',json={},headers=self.headers).json();self.send(t2)
-        self.store.execute('UPDATE execution_configs SET created=? WHERE thread_id=?',(time.time()-2800,t['id']))
+        self.store.execute('UPDATE execution_configs SET created=? WHERE thread_id=?',(time.time()-7200,t['id']))
         sbx=self.sandbox(w);sid=self.current(t)['session_id'];sid2=self.current(t2)['session_id']
         async def check():
             task=asyncio.create_task(self.cloud.maintenance())
             try:
                 for _ in range(100):
-                    if sbx.native[sid]['status']['type']=='idle':break
+                    if self.store.one("SELECT 1 FROM e2b_events WHERE workspace_id=? AND kind='checkpoint.saved'",(w['id'],)):break
                     await asyncio.sleep(.01)
-                self.assertEqual(sbx.native[sid]['status']['type'],'idle')
+                self.assertEqual(sbx.native[sid]['status']['type'],'busy')
+                self.assertFalse(self.store.one("SELECT 1 FROM e2b_events WHERE workspace_id=? AND kind='execution.timeout'",(w['id'],)))
                 self.assertEqual(sbx.native[sid2]['status']['type'],'busy')
             finally:task.cancel();await asyncio.gather(task,return_exceptions=True)
         self.run_async(check())

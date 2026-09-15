@@ -188,6 +188,7 @@ def visible_event(event, session_id, text_parts, view=None):
     kind = event.get("type", "")
     p = event.get("properties", {})
     owner = p.get("sessionID") or p.get("part", {}).get("sessionID") or p.get("info", {}).get("sessionID")
+    if kind == "session.updated":owner = p.get("info", {}).get("id")
     if owner != session_id:
         return None
     message_id = p.get("messageID") or p.get("part", {}).get("messageID")
@@ -202,7 +203,7 @@ def visible_event(event, session_id, text_parts, view=None):
     elif kind == "message.part.delta":
         if p.get("partID") not in text_parts or p.get("field") != "text":
             return None
-    elif kind not in {"message.updated", "session.status", "session.error", "todo.updated", "session.compacted",
+    elif kind not in {"session.updated", "message.updated", "session.status", "session.error", "todo.updated", "session.compacted",
                       "question.asked", "question.replied", "question.rejected",
                       "permission.asked", "permission.replied"}:
         return None

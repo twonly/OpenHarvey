@@ -53,7 +53,7 @@ class LocalProcessDriver:
         env={k:v for k,v in os.environ.items() if not k.startswith(('CW_','E2B_','RAILWAY_','SUPABASE_','OPENCODE_','ANTHROPIC_','OPENAI_','DEEPSEEK_','GLM_','ZHIPU_'))}
         env.update({'XDG_CONFIG_HOME':str(state/'config'),'XDG_DATA_HOME':str(state/'data'),'XDG_STATE_HOME':str(state/'state'),'XDG_CACHE_HOME':str(state/'cache'),
                     'OPENCODE_CONFIG':str(path),'OPENCODE_SERVER_PASSWORD':config['password'],'OPENCODE_DISABLE_CLAUDE_CODE':'true','OPENCODE_ENABLE_QUESTION_TOOL':'true','OPENCODE_DISABLE_EXTERNAL_SKILLS':'true',
-                    'OPENCODE_ENABLE_EXA':'true','OPENCODE_WEBSEARCH_PROVIDER':'exa'})
+                    'OPENCODE_ENABLE_EXA':'true','OPENCODE_WEBSEARCH_PROVIDER':'exa','OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX':'384000'})
         with (state/'service.log').open('ab') as log:
             process=subprocess.Popen([binary,'serve','--pure','--hostname','127.0.0.1','--port',config['url'].rsplit(':',1)[-1]],cwd=root/'threads',env=env,stdout=log,stderr=subprocess.STDOUT,start_new_session=True)
         for _ in range(100):

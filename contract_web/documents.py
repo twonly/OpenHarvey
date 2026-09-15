@@ -14,7 +14,7 @@ SUFFIXES = {".docx", ".pdf", ".md", ".txt"}
 CITATION = CITE
 
 
-def prepare(path, document_id):
+def prepare(path, document_id, *, defer_outline=False):
     if path.suffix == ".docx":
         with zipfile.ZipFile(path) as z:
             if sum(i.file_size for i in z.infolist()) > 100 * 1024 * 1024:
@@ -37,7 +37,8 @@ def prepare(path, document_id):
         segment["citation"] = f"【D{document_id}:B{i}】"
     annotated = "\n".join(f'{s["citation"]} {s["text"]}' for s in mapping["segments"])
     mapping.update(document_id=document_id, source_hash=source_hash, text=text)
-    mapping["outline"] = document_outline(path, mapping)
+    mapping["outline"] = ({"status": "pending", "entries": []} if defer_outline
+                          else document_outline(path, mapping))
     (path.parent / "contract.md").write_text(annotated, encoding="utf-8")
     (path.parent / "document.json").write_text(json.dumps(mapping, ensure_ascii=False), encoding="utf-8")
     return mapping

@@ -2,14 +2,15 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<script src="/static/locale-boot.js"></script><style>html[lang=en] [data-initial-locale="zh-CN"],html:not([lang=en]) [data-initial-locale="en"]{display:none}</style>
 <title>合同空间 · OpenHarvey</title>
 <link rel="icon" href="/static/brand/openharvey.svg">
-<link rel="stylesheet" href="/static/spaces.css?v=20260912-1">
-<link rel="stylesheet" href="/static/account-ui.css?v=20260913-header-2">
+<link rel="stylesheet" href="/static/spaces.css?v=20260914-loading-all">
+<link rel="stylesheet" href="/static/account-ui.css?v=20260914-loading-all">
 <link rel="stylesheet" href="/static/workspace-controls.css?v=20260913-4">
-</head>
+<script defer src="/static/site-telemetry.js?v=20260914-1"></script><link rel="stylesheet" href="/static/i18n.css?v=20260914-1"><script type="module" src="/static/language-ui.js"></script></head>
 <body data-auth="loading">
-<div id="authLoading" class="auth-loading" role="status">正在打开合同空间…</div>
+<div id="authLoading" class="auth-loading" role="status"><p id="authLoadingText" class="loading-status" aria-busy="true"><span class="loading-spinner" aria-hidden="true"></span><span data-no-i18n><span data-initial-locale="zh-CN">正在打开合同空间…</span><span data-initial-locale="en">Opening Workspaces…</span></span></p><button id="authRetry" hidden>重新连接</button></div>
 <section id="loginView" class="login-view" hidden>
   <form id="loginForm" class="login-card">
     <img src="/static/brand/openharvey.svg" width="46" height="46" alt="">
@@ -22,7 +23,7 @@
 <div id="spacesApp" hidden>
   <header class="topbar">
     <a href="/spaces" class="brand"><img src="/static/brand/openharvey.svg" width="30" height="30" alt=""><span><b>OpenHarvey</b><small>OPENHARVEY</small></span></a>
-    <nav><a href="/spaces" aria-current="page">合同空间</a><a href="/landing" target="_blank" rel="noopener">产品介绍 ↗</a><a href="/config">设置</a><span id="username"></span><button id="logout">退出</button></nav>
+    <nav><a href="/spaces" aria-current="page">合同空间</a><a href="/landing" target="_blank" rel="noopener">产品介绍 ↗</a><a href="/config">设置</a><span id="username"></span><button id="logout" hidden>退出</button></nav>
   </header>
   <main>
     <section class="hero">
@@ -50,6 +51,6 @@
 <dialog id="confirmDialog"><form method="dialog"><div class="danger-mark">!</div><h2 id="confirmHeading"></h2><p id="confirmCopy"></p><div class="dialog-actions"><button value="cancel">取消</button><button value="confirm" class="danger" id="confirmAction">确认</button></div></form></dialog>
 <dialog id="renameDialog"><form method="dialog"><p class="eyebrow">SPACE NAME</p><h2>重命名合同空间</h2><label>空间名称<input id="renameInput" maxlength="120" required></label><div class="dialog-actions"><button value="cancel">取消</button><button value="save" class="primary">保存</button></div></form></dialog>
 <div id="notice" role="status" hidden></div>
-<script type="module" src="/static/spaces.js?v=20260913-header-2"></script>
+<script type="module" src="/static/spaces.js?v=20260914-loading-all"></script>
 </body>
 </html>

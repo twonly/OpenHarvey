@@ -52,3 +52,7 @@ For a consistent backup, stop application writes and copy the complete data dire
 ## Public website
 
 `PYTHONPATH=. python scripts/export_website.py /absolute/new/output-directory --workbench-origin https://your-backend.example.com` generates a static Chinese homepage, `/en`, bilingual information pages, sitemap and crawler files. It does not include business data. Product links stay on the website domain; Vercel rewrites forward workbench pages, assets, authentication and API requests to the HTTPS backend. Private responses are not cached, and artifact previews retain the backend CSP. Keep the backend's `CW_PUBLIC_ORIGIN`, explicit `CW_ADDITIONAL_ORIGINS`, and your authentication provider's callback allowlist aligned with the website domain. Cookies are host-only, so existing users must sign in again on a new domain; account data stays in the same backend.
+
+## Feishu / Lark integration
+
+The web Docker image includes the pinned official CLI and credential adapter. Enable the connector explicitly and retain its per-user credential directory on the persistent volume. See [connector setup and deployment](feishu-lark.md) for variables, scopes, native E2B execution and validation limits.

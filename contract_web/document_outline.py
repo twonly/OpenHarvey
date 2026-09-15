@@ -3,7 +3,7 @@ import logging
 import re
 
 from .extract_text import extract_docx_mapped
-from .pdf_preview import read_pdf_outline
+from .pdf_preview import read_pdf_outline, read_pdf_link_outline
 
 
 def document_outline(path, mapping):
@@ -12,6 +12,9 @@ def document_outline(path, mapping):
     try:
         if kind == "pdf-bookmarks":
             entries = read_pdf_outline(path)
+            if not entries:
+                entries = read_pdf_link_outline(path, mapping)
+                kind = "pdf-toc-links"
         elif kind == "word-headings":
             segments = mapping["segments"]
             # Older saved source maps have inferred h values. Re-read only native
