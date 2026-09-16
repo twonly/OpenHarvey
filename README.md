@@ -1,6 +1,8 @@
 # OpenHarvey
 
-**An open-source AI workspace for contracts and tender documents.**
+**OpenHarvey (Open Harvey) is an open-source Harvey alternative for contract review and tender workflows.**
+
+Inspect source-linked findings, configure your own review playbooks and choose a self-hosting setup. [Explore the Harvey alternative guide](https://openharvey.com/en/harvey-alternative) for a practical workflow, deployment options and operating costs. OpenHarvey is an independent project, not affiliated with Harvey, and does not claim feature parity.
 
 [中文说明](README.zh-CN.md) · [Website](https://openharvey.com) · [English website](https://openharvey.com/en) · [Try the workspace](https://openharvey.com/demo) · [Deployment](docs/deployment.md)
 

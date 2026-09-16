@@ -1,6 +1,8 @@
 # OpenHarvey
 
-**围绕合同与标书设计的开源 AI 工作台。**
+**OpenHarvey（Open Harvey）：面向合同审查与标书工作流的开源 Harvey 替代方案。**
+
+支持原文溯源、自定义风险库与自托管选项。[查看开源 Harvey 替代方案介绍](https://openharvey.com/harvey-alternative)，了解实际工作流、部署与运行费用。OpenHarvey 是独立项目，与 Harvey 无关联，不宣称功能全面对等。
 
 [English](README.md) · [官网](https://openharvey.com) · [在线试用](https://openharvey.com/demo) · [部署说明](docs/deployment.md)
 
