@@ -66,7 +66,8 @@ document.addEventListener('visibilitychange',()=>{
   workbenchRevision++;
   if(workbenchVisible())background(resumeWorkbench());
 });
-const settingsUI=setupSettings({notice,onOpen:()=>{workbenchRevision++;},onClose:async()=>{
+const settingsUI=setupSettings({notice,onOpen:async()=>{await redline.close();workbenchRevision++;},onClose:async()=>{
+  identity=await api('/api/me');syncRedlineAccess();
   if(!workspace){await loadList();const saved=new URL(savedWorkbenchURL(sessionStorage.getItem('workbench-location')),location.origin).hash.match(/^#([a-f0-9]+)(?:\/thread\/([a-f0-9]+))?$/);if(saved)await selectWorkspace(saved[1],saved[2]);else if(workspaces.length)await selectWorkspace(workspaces[0].id);else{location.assign('/spaces');return;}}
   await resumeWorkbench();
   await Promise.all([loadModels(),loadRiskSchemes()]);
@@ -291,6 +292,8 @@ $('threadScope').onchange=protect(e=>changeThreadScope(e.target.value));
 $('restoreCurrentThread').onclick=protect(()=>manageThread(tid,'restore'));
 
 document.addEventListener('click',e=>{if(e.target.closest('#messageHistory'))void handleMemoryAction(e,{notice});});
+document.addEventListener('labs-changed',()=>{void api('/api/me').then(async me=>{identity=me;if(!me.capabilities?.redline)await redline.close();syncRedlineAccess();}).catch(e=>notice(e.message));});
+window.addEventListener('storage',e=>{if(e.key==='labs-change')document.dispatchEvent(new Event('labs-changed'));});
 document.addEventListener('memory-changed',()=>{if(tid)void restore().catch(e=>notice(e.message));});
 window.addEventListener('storage',e=>{if(e.key==='memory-change')document.dispatchEvent(new Event('memory-changed'));});
 
@@ -475,9 +478,10 @@ async function loadSource(docid){
   return request.promise;
 }
 
+function syncRedlineAccess(){$('viewRedline').hidden=!identity?.capabilities?.redline||!tid||!String(source?.filename||'').toLowerCase().endsWith('.docx');}
 async function renderSource(){
   if(!source)return;
-  $('viewRedline').hidden=!identity?.capabilities?.redline||!tid||!String(source.filename||'').toLowerCase().endsWith('.docx');
+  syncRedlineAccess();
   if(redline.documentId===source.id)return;
   stopPdfPages();stopPdfPages=()=>{};
   const host=$('sourceContent'),doc=source,view=epoch,load=sourceEpoch,render=++sourceRenderEpoch;

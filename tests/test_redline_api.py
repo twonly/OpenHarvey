@@ -6,8 +6,9 @@ from tests import test_workbench as workbench_tests
 
 class RedlineApiTests(unittest.TestCase):
     def setUp(self):
-        self.env=patch.dict(os.environ,{'CW_REDLINE_USERS':'alice'});self.env.start()
+        self.env=patch.dict(os.environ,{'CW_REDLINE_ENABLED':'1'});self.env.start()
         self.base=workbench_tests.WorkbenchTests();self.base.setUp();self.c=self.base.client
+        self.base.store.execute("UPDATE users SET preferences=json_set(preferences,'$.redline_enabled',json('true')) WHERE id=?",(self.base.uid,))
         d=Document();d.add_paragraph('付款期限为30天。');b=io.BytesIO();d.save(b)
         self.w=self.c.post('/api/workspaces',content=b.getvalue(),headers={**self.base.headers,'X-Filename':'test.docx'}).json()
         self.t=self.c.post('/api/workspaces/'+self.w['id']+'/threads',json={},headers=self.base.headers).json()
@@ -29,7 +30,7 @@ class RedlineApiTests(unittest.TestCase):
         meta=self.c.get('/api/artifacts/'+exported['artifact_id']).json();self.assertTrue(meta['redline']);self.assertEqual(meta['formats'],['docx'])
         self.base.login('bob');self.assertEqual(self.c.get(direct_url).status_code,404);self.assertEqual(self.c.get(self.url).status_code,404);self.assertEqual(self.c.get(exported['download_url']).status_code,404)
     def test_flag_and_invalid_write_do_not_expose_editing(self):
-        with patch.dict(os.environ,{'CW_REDLINE_USERS':''}):self.assertEqual(self.c.get(self.url).status_code,403)
+        with patch.dict(os.environ,{'CW_REDLINE_ENABLED':'0'}):self.assertEqual(self.c.get(self.url).status_code,403)
         bad=self.c.post(self.url.replace('?', '/operations?'),json={'action':'save'},headers=self.base.headers)
         self.assertEqual(bad.status_code,422)
     def test_foreign_thread_attachment_stays_inaccessible(self):

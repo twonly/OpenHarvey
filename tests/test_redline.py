@@ -19,8 +19,9 @@ from contract_web.redline import Redline, validate_docx
 class RedlineTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.tmp=tempfile.TemporaryDirectory();self.root=Path(self.tmp.name)
-        self.env=patch.dict(os.environ,{'CW_REDLINE_USERS':'alice'});self.env.start()
+        self.env=patch.dict(os.environ,{'CW_REDLINE_ENABLED':'1'});self.env.start()
         self.store=Store(self.root);uid=self.store.add_user('alice','test-password-long')
+        self.store.execute("UPDATE users SET preferences=json_set(preferences,'$.redline_enabled',json('true')) WHERE id=?",(uid,))
         self.u=self.store.one('SELECT * FROM users WHERE id=?',(uid,))
         self.store.execute('INSERT INTO workspaces(id,user_id,document_id,title,created) VALUES(?,?,?,?,?)',('workspace',uid,'doc','合同',1))
         self.t={'id':'thread','workspace_id':'workspace'}

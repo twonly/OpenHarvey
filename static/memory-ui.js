@@ -1,3 +1,4 @@
+import {redlineLabsHTML,announceLabsChange} from './redline-labs.js';
 import {api} from './api.js';
 import {esc} from './markdown.js';
 import {t as tr,getLanguage} from './i18n.js';
@@ -67,8 +68,14 @@ export async function handleMemoryAction(event,{notice=()=>{},dirty=()=>{}}={}){
 }
 
 export async function renderLabs(root,{notice,dirty,isCurrent=()=>true}){
-  const [status,data]=await Promise.all([api('/api/settings/labs'),api('/api/memories')]);if(!isCurrent())return;
-  root.innerHTML=`<div class="settings-heading"><div><h2>Labs</h2><p>${tr('尝试工作台的实验功能。')}</p></div></div><section class="memory-labs"><header><div><h3>${tr('个人记忆')}</h3><p>${tr('记住你的工作偏好，供后续对话使用。')}</p></div><label class="settings-check"><input type="checkbox" data-memory-toggle ${status.memory_enabled?'checked':''} ${!status.available?'disabled':''}>${tr('开启')}</label></header><p class="settings-note" role="status">${tr(!status.available?'当前账号暂不可开启个人记忆':status.effective?'已开启：助手可以主动保存长期偏好。':'已暂停使用和自动保存，已有记忆保留。')}</p>${status.requires_login?`<a href="/login">${tr('登录正式账号')}</a>`:''}<p class="settings-note">${tr('关闭或删除不移除旧聊天，正在生成的答复可能已使用记忆。')}</p><div class="memory-toolbar"><input type="search" data-memory-search placeholder="${tr('搜索记忆')}" aria-label="${tr('搜索记忆')}"><button type="button" data-memory-add>${tr('添加记忆')}</button></div><p class="settings-note">${data.used.toLocaleString()} / ${data.limit.toLocaleString()} ${tr('字符')}</p><div data-memory-list></div></section>`;
+  const [status,data,redline]=await Promise.all([api('/api/settings/labs'),api('/api/memories'),api('/api/settings/labs/redline')]);if(!isCurrent())return;
+  root.innerHTML=`<div class="settings-heading"><div><h2>Labs</h2><p>${tr('尝试工作台的实验功能。')}</p></div></div><section class="memory-labs"><header><div><h3>${tr('个人记忆')}</h3><p>${tr('记住你的工作偏好，供后续对话使用。')}</p></div><label class="settings-check"><input type="checkbox" data-memory-toggle ${status.memory_enabled?'checked':''} ${!status.available?'disabled':''}>${tr('开启')}</label></header><p class="settings-note" role="status">${tr(!status.available?'当前账号暂不可开启个人记忆':status.effective?'已开启：助手可以主动保存长期偏好。':'已暂停使用和自动保存，已有记忆保留。')}</p>${status.requires_login?`<a href="/login">${tr('登录正式账号')}</a>`:''}<p class="settings-note">${tr('关闭或删除不移除旧聊天，正在生成的答复可能已使用记忆。')}</p><div class="memory-toolbar"><input type="search" data-memory-search placeholder="${tr('搜索记忆')}" aria-label="${tr('搜索记忆')}"><button type="button" data-memory-add>${tr('添加记忆')}</button></div><p class="settings-note">${data.used.toLocaleString()} / ${data.limit.toLocaleString()} ${tr('字符')}</p><div data-memory-list></div></section>${redlineLabsHTML(redline)}`;
+  root.querySelector('[data-redline-toggle]').onchange=async e=>{
+    const button=e.target;button.disabled=true;
+    try{await api('/api/settings/labs/redline',{method:'PATCH',body:{redline_enabled:button.checked,revision:redline.revision}});}
+    catch(error){button.checked=redline.redline_enabled;notice(error.message);}
+    finally{button.disabled=!redline.available;announceLabsChange();}
+  };
   const list=root.querySelector('[data-memory-list]'),search=root.querySelector('[data-memory-search]');
   const render=()=>{const q=search.value.toLowerCase();list.innerHTML=data.items.filter(i=>i.content.toLowerCase().includes(q)).map(i=>memoryItemHTML(i)).join('')||`<p class="settings-empty">${tr('暂无匹配记忆。可手动添加，或开启后在对话中说“记住……”。')}</p>`;};
   search.oninput=render;render();root.querySelector('[data-memory-add]').onclick=()=>editMemory(null,{dirty});

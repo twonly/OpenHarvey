@@ -21,6 +21,7 @@ export function setupSettings({notice,onClose,onOpen}){
   const run=fn=>async(...args)=>{try{await fn(...args);}catch(e){notice(e.message);}};
   document.addEventListener('ui-language-changed',()=>{if(!root.hidden&&!dirty)void render();});
   document.addEventListener('memory-changed',()=>{if(!root.hidden&&tab==='labs'&&!dirty)void render().catch(e=>notice(e.message));});
+  document.addEventListener('labs-changed',()=>{if(!root.hidden&&tab==='labs'&&!dirty)void render().catch(e=>notice(e.message));});
   window.addEventListener('focus',()=>{if(!root.hidden&&tab==='labs'&&!dirty)void render().catch(e=>notice(e.message));});
   const leave=()=>!dirty||confirm(tr('有尚未保存的修改，确定离开？'));
   const field=(label,name,value='',extra='')=>`<label>${esc(label)}<input name="${name}" value="${esc(value??'')}" ${extra}></label>`;
@@ -37,9 +38,10 @@ export function setupSettings({notice,onClose,onOpen}){
     identity=user||await api('/api/me');
     if(['members','organization'].includes(next)&&identity.role!=='admin'){next='general';historyMode='replace';notice(tr('当前账号不能访问管理页面。'));}
     if(root.hidden)returnURL=settingsTab(location.pathname)?savedWorkbenchURL(sessionStorage.getItem('workbench-location')):location.pathname+location.search+location.hash;
+    await onOpen?.();
     document.getElementById('workspaceSwitcher').open=false;
     document.getElementById('appShell').inert=true;
-    root.hidden=false;tab=next;dirty=false;route(next,historyMode);onOpen?.();
+    root.hidden=false;tab=next;dirty=false;route(next,historyMode);
     try{await render();}catch(error){$('#settingsPage').innerHTML='<p class="settings-empty" role="alert">'+esc(error.message)+'</p>';throw error;}
   }
   async function close({historyMode='push'}={}){

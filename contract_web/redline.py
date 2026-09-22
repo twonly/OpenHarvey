@@ -143,6 +143,14 @@ class Redline:
                 thread_id TEXT NOT NULL, created REAL NOT NULL,
                 PRIMARY KEY(document_id, request_id));
             ''')
+            # Keep previously enabled internal accounts usable during the opt-in rollout.
+            # This is a one-time preference migration, never an ongoing allowlist.
+            if not db.execute("SELECT 1 FROM settings_migrations WHERE name='redline-labs-opt-in'").fetchone():
+                allowed = {name.strip() for name in os.environ.get('CW_REDLINE_USERS', '').split(',') if name.strip()}
+                for row in db.execute("SELECT id,username FROM users WHERE account_kind!='demo' AND json_type(preferences,'$.redline_enabled') IS NULL").fetchall():
+                    if row['username'] in allowed or '*' in allowed:
+                        db.execute("UPDATE users SET preferences=json_set(preferences,'$.redline_enabled',json('true')),settings_revision=settings_revision+1 WHERE id=?", (row['id'],))
+                db.execute("INSERT INTO settings_migrations(name) VALUES('redline-labs-opt-in')")
             if migrate_history:
                 # Backfill only from durable receipts; unknown legacy operations remain separate.
                 receipts={}
@@ -169,14 +177,38 @@ class Redline:
         for c in snapshot.get('comments',[]):
             db.execute('INSERT OR REPLACE INTO redline_discussions VALUES(?,?,?,?)',(did,c['id'],vid,json.dumps(c,ensure_ascii=False)))
 
+    def status(self, user, db=None):
+        row = dict(db.execute('SELECT * FROM users WHERE id=?', (user['id'],)).fetchone()) if db else self.store.one('SELECT * FROM users WHERE id=?', (user['id'],))
+        available = bool(row['active'] and (not row.get('expires_at') or row['expires_at'] > time.time())
+                         and row.get('account_kind') != 'demo' and os.environ.get('CW_REDLINE_ENABLED', '1') == '1')
+        enabled = json.loads(row['preferences']).get('redline_enabled') is True
+        return {'available': available, 'redline_enabled': enabled, 'effective': available and enabled,
+                'requires_login': row.get('account_kind') == 'demo', 'revision': row['settings_revision']}
+
     def enabled(self, user):
-        user=self.store.one('SELECT * FROM users WHERE id=?',(user['id'],)) or user
-        allowed = [name.strip() for name in os.environ.get('CW_REDLINE_USERS', '').split(',')]
-        return user.get('account_kind') != 'demo' and (user['username'] in allowed or '*' in allowed)
+        return self.status(user)['effective']
+
+    def set_enabled(self, user, body):
+        if not isinstance(body, dict) or set(body) != {'redline_enabled', 'revision'} or type(body['redline_enabled']) is not bool or type(body['revision']) is not int:
+            raise HTTPException(422, '审改设置无效')
+        with self.store.connect() as db:
+            db.execute('BEGIN IMMEDIATE')
+            status = self.status(user, db)
+            if body['revision'] != status['revision']:
+                raise HTTPException(409, '设置已更新，请重新载入后保存')
+            if body['redline_enabled'] and not status['available']:
+                raise HTTPException(403, '当前账号暂不可开启 DOCX 审改')
+            if not body['redline_enabled']:
+                rows = db.execute('SELECT r.* FROM redline_documents r JOIN documents d ON d.id=r.document_id WHERE d.user_id=?', (user['id'],)).fetchall()
+                for row in rows:
+                    if (row['lease_id'] and row['lease_until'] > time.time()) or row['yield_requested'] or any(locks.get(row['document_id']) and locks[row['document_id']].locked() for locks in (self.locks, self.handoff_locks)):
+                        raise HTTPException(409, '合同仍在编辑或保存，请先保存并关闭审改窗口后再关闭功能')
+            db.execute("UPDATE users SET preferences=json_set(preferences,'$.redline_enabled',json(?)),settings_revision=settings_revision+1 WHERE id=?", (json.dumps(body['redline_enabled']), user['id']))
+        return self.status(user)
 
     def authorize(self, u, t, did):
         if not self.enabled(u):
-            raise HTTPException(403, '此账号尚未启用 DOCX 审改')
+            raise HTTPException(403, '请在 Labs 开启 DOCX 审改')
         # Deliberately enforce thread attachment isolation for both runtimes.
         d = self.store.one('SELECT * FROM documents WHERE id=? AND user_id=? AND workspace_id=? AND (thread_id IS NULL OR thread_id=?)', (did, u['id'], t['workspace_id'], t['id']))
         if not d:
@@ -452,6 +484,14 @@ class Redline:
 
 
 def register_redline(app, service, user, thread):
+    @app.get('/api/settings/labs/redline')
+    async def redline_status(request: Request):
+        return service.status(user(request))
+
+    @app.patch('/api/settings/labs/redline')
+    async def redline_settings(request: Request):
+        return service.set_enabled(user(request), await request.json())
+
     async def scope(request,did,writable=True):
         u=user(request);t=thread(u,request.query_params.get('thread_id'),writable)
         d=service.authorize(u,t,did)

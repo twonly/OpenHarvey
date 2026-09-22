@@ -26,7 +26,7 @@ The website and workspace interface support Chinese and English. Existing docume
 - **Review with the agent in the contract:** select a clause, request an edit and save it as native pending tracked changes. Changes and comments link to their text; accepting a change and resolving a comment are separate decisions.
 - **Keep your place and your history:** linked heading navigation, autosave, grouped save history, named milestones and restore-as-new-version. Preserve the uploaded original and download revised or clean DOCX files.
 
-DOCX review is a **limited rollout for enabled accounts**, built with SuperDoc 1.46.3 on the AGPL route. Single-user editing only; PDFs remain available for reading, analysis and suggestions. Clean export requires resolving pending changes. Complex layout fidelity and complete Word/WPS accept/reject compatibility are still under evaluation.
+DOCX review is **opt-in for registered accounts in Settings → Labs** (off by default), built with SuperDoc 1.46.3 on the AGPL route. Turning it off keeps saved changes, comments and versions. Single-user editing only; PDFs remain available for reading, analysis and suggestions. Clean export requires resolving pending changes. Complex layout fidelity and complete Word/WPS accept/reject compatibility are still under evaluation.
 
 [Feature details](https://openharvey.com/en/features#latest) · [Setup and boundaries](docs/memory-and-review.md)
 
