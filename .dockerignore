@@ -8,4 +8,9 @@ output
 .env*
 deploy/generated
 tests
-.vercel
+docs
+
+.cache
+static/vendor/redline-editor.*
+static/vendor/SuperDoc-LICENSE.txt
+static/vendor/README.txt
