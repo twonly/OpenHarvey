@@ -231,12 +231,16 @@ class E2BTests(unittest.TestCase):
             return []
         with patch.object(Runtime,'messages',side_effect=old_snapshot):self.run_async(self.cloud.collect_thread(self.u,t))
         self.assertEqual(self.cloud.history(t['id'])[0][-1]['parts'][0]['text'],'金额128000元。')
+        with patch.object(self.cloud,'history_changed') as notify:
+            emit('message.part.delta',{'sessionID':'other','messageID':'streamed','partID':'text1','field':'text','delta':'wrong'})
+            emit('message.part.updated',{'part':{'id':'reason','messageID':'streamed','sessionID':sid,'type':'reasoning','text':'hidden'}})
+            notify.assert_not_called()
 
     def test_stream_persistence_does_not_block_other_http_requests(self):
         import threading
         w,t=self.make_workspace();self.send(t);t=self.current(t)
         entered=threading.Event();release=threading.Event()
-        original=self.cloud.ingest_event
+        original=self.cloud.persist_history
         def slow(*args):
             entered.set()
             if not release.wait(3):raise AssertionError('HTTP could not run while persistence was busy')
@@ -259,7 +263,7 @@ class E2BTests(unittest.TestCase):
                     self.assertFalse(release.is_set())
             finally:
                 release.set();task.cancel();await asyncio.gather(task,return_exceptions=True)
-        with patch.object(Runtime,'events',events),patch.object(self.cloud,'ingest_event',slow):self.run_async(check())
+        with patch.object(Runtime,'events',events),patch.object(self.cloud,'persist_history',slow):self.run_async(check())
 
     def test_model_probe_runs_in_ephemeral_e2b_and_kills_it(self):
         rows=self.app.state.models.snapshot(self.app.state.models.scope(self.u))
@@ -268,6 +272,92 @@ class E2BTests(unittest.TestCase):
         self.assertEqual(FakeSandbox.created,1);self.assertEqual(FakeSandbox.instances,{})
         self.assertEqual(self.store.all('SELECT * FROM e2b_bindings'),[])
         self.assertEqual(FakeSandbox.options[0]['lifecycle']['on_timeout'],'kill')
+
+    def test_tokens_reach_viewers_while_database_save_is_blocked(self):
+        import threading
+        w,t=self.make_workspace();self.send(t);t=self.current(t);sid=t['session_id']
+        entered=threading.Event();release=threading.Event()
+        original=self.cloud.persist_history
+        def slow(*args):
+            entered.set()
+            if not release.wait(4):raise AssertionError('Visible tokens waited for the database')
+            return original(*args)
+        async def native(*args):
+            yield {'type':'message.updated','properties':{'info':{'id':'fast','sessionID':sid,'role':'assistant'}}}
+            yield {'type':'message.part.updated','properties':{'part':{'id':'fast-text','messageID':'fast','sessionID':sid,'type':'text','text':''}}}
+            while not entered.is_set():await asyncio.sleep(.005)
+            for _ in range(40):
+                yield {'type':'message.part.delta','properties':{'sessionID':sid,'messageID':'fast','partID':'fast-text','field':'text','delta':'快'}}
+                await asyncio.sleep(.005)
+            await asyncio.Event().wait()
+        async def check():
+            task=asyncio.create_task(self.cloud.stream(self.u,t))
+            async def viewer():
+                stream=self.cloud.runtime(self.u,w).events(t);updates=[]
+                try:
+                    async for event in stream:
+                        part=event.get('properties',{}).get('part',{})
+                        if part.get('id')=='fast-text':
+                            updates.append(part.get('text',''))
+                            if len(part.get('text',''))==40:return updates
+                finally:await stream.aclose()
+            try:
+                a,b=await asyncio.wait_for(asyncio.gather(viewer(),viewer()),2)
+                self.assertGreater(len(a),3);self.assertGreater(len(b),3)
+                self.assertFalse(release.is_set())
+                saved=self.store.one('SELECT messages FROM e2b_history WHERE thread_id=?',(t['id'],))
+                self.assertNotIn('快',saved['messages'] if saved else '')
+                self.assertEqual(self.cloud.history(t['id'])[0][-1]['parts'][0]['text'],'快'*40)
+            finally:
+                release.set();task.cancel();await asyncio.gather(task,return_exceptions=True)
+            self.assertIn('快'*40,self.store.one('SELECT messages FROM e2b_history WHERE thread_id=?',(t['id'],))['messages'])
+            self.assertFalse(self.cloud.history_listeners[t['id']])
+        with patch.object(Runtime,'events',native),patch.object(self.cloud,'persist_history',slow):self.run_async(check())
+
+    def test_failed_background_save_retries_and_recovery_can_lose_unsaved_tail(self):
+        w,t=self.make_workspace();self.send(t);t=self.current(t);sid=t['session_id']
+        self.cloud.ingest_event(self.u,t,{'type':'message.updated','properties':{'info':{'id':'saved','sessionID':sid,'role':'assistant'}}})
+        self.cloud.ingest_event(self.u,t,{'type':'message.part.updated','properties':{'part':{'id':'p','messageID':'saved','sessionID':sid,'type':'text','text':'已保存'}}})
+        original=self.cloud.persist_history;calls=[]
+        def flaky(*args):
+            calls.append(1)
+            if len(calls)==1:raise OSError('temporary storage failure')
+            return original(*args)
+        async def check():
+            task=asyncio.create_task(self.cloud.persist_loop(self.u,t))
+            try:
+                for _ in range(160):
+                    await asyncio.sleep(.01)
+                    if self.cloud.saved_revisions.get(t['id'])==self.cloud.event_revisions[t['id']]:break
+                self.assertGreaterEqual(len(calls),2)
+                self.assertEqual(self.cloud.saved_revisions[t['id']],self.cloud.event_revisions[t['id']])
+                self.assertFalse(task.done())
+            finally:task.cancel();await asyncio.gather(task,return_exceptions=True)
+        with patch.object(self.cloud,'persist_history',flaky):self.run_async(check())
+        self.cloud.ingest_event(self.u,t,{'type':'message.part.delta','properties':{'sessionID':sid,'messageID':'saved','partID':'p','field':'text','delta':'未保存尾部'}})
+        self.assertEqual(self.cloud.history(t['id'])[0][-1]['parts'][0]['text'],'已保存未保存尾部')
+        self.cloud.live_history.pop(t['id']) # Simulate process loss before the next save.
+        self.assertEqual(self.cloud.history(t['id'])[0][-1]['parts'][0]['text'],'已保存')
+
+    def test_live_history_redacts_secrets_and_does_not_write_per_token(self):
+        w,t=self.make_workspace();self.send(t);t=self.current(t);sid=t['session_id']
+        self.cloud.load_live_history(self.u,t)
+        with patch.object(self.store,'execute',side_effect=AssertionError('No per-token disk writes')):
+            self.cloud.ingest_event(self.u,t,{'type':'message.updated','properties':{'info':{'id':'live','sessionID':sid,'role':'assistant'}}})
+            self.cloud.ingest_event(self.u,t,{'type':'message.part.updated','properties':{'part':{'id':'p','messageID':'live','sessionID':sid,'type':'text','text':'model-secret-'}}})
+            self.cloud.ingest_event(self.u,t,{'type':'message.part.delta','properties':{'sessionID':sid,'messageID':'live','partID':'p','field':'text','delta':'123456'}})
+        self.assertNotIn('model-secret-123456',encoded(self.cloud.history(t['id'])))
+        self.cloud.persist_history(self.u,t)
+        self.assertNotIn('model-secret-123456',self.store.one('SELECT messages FROM e2b_history WHERE thread_id=?',(t['id'],))['messages'])
+        # An existing SSE connection also picks up credentials rotated between turns.
+        self.cloud.streams[t['id']]=SimpleNamespace(done=lambda:False)
+        self.cloud.stream_ready[t['id']]=asyncio.Event()
+        try:
+            with patch.object(self.cloud,'secrets',return_value=['rotated-private-value']):
+                E2B.watch(self.cloud,self.u,t)
+            self.cloud.ingest_event(self.u,t,{'type':'message.part.updated','properties':{'part':{'id':'p','messageID':'live','sessionID':sid,'type':'text','text':'rotated-private-value'}}})
+            self.assertNotIn('rotated-private-value',encoded(self.cloud.history(t['id'])))
+        finally:self.cloud.streams.pop(t['id'])
 
     def test_waiting_for_input_pauses_and_retains_request(self):
         w,t=self.make_workspace();self.send(t);t=self.current(t);sbx=self.sandbox(w)
@@ -630,6 +720,19 @@ class E2BTests(unittest.TestCase):
         req['report']['content']='changed';sbx.files.data[path]=encoded(req).encode()
         with self.assertRaises(Exception):self.run_async(self.cloud.collect_submissions(self.u,w,sbx))
         self.assertEqual(len(self.store.all('SELECT * FROM artifacts')),1)
+
+    def test_redline_working_files_and_attachment_exports_are_not_shared(self):
+        w,t=self.make_workspace()
+        root=self.store.user_root(self.uid)
+        private=root/'sources'/w['document_id']/'redline';private.mkdir();(private/'working-native-secret.docx').write_bytes(b'private working bytes')
+        self.store.execute('INSERT INTO documents VALUES(?,?,?,?,?,?,?)',('attached-redline',self.uid,w['id'],t['id'],'private.docx','.docx','private-hash'))
+        out=root/'published'/'private-redline';out.mkdir(parents=True)
+        (out/'content.docx').write_bytes(b'private exported bytes')
+        (out/'report.json').write_text(encoded({'redline':True,'document_id':'attached-redline','format':'docx'}))
+        self.store.execute('INSERT INTO artifacts VALUES(?,?,?,?,?,?,?,?)',('private-redline',w['id'],t['id'],'document','附件修订','export-hash','private-hash',time.time()))
+        self.send(t);t=self.current(t);sbx=self.sandbox(w)
+        self.assertFalse(any('working-native-secret' in p or '/published/private-redline/' in p for p in sbx.files.data))
+        self.assertTrue(any(p.startswith('/workspace/input/') for p in sbx.files.data))
 
     def test_sync_is_incremental_and_removes_deleted_source(self):
         w,t=self.make_workspace();self.send(t);t=self.current(t);sbx=self.sandbox(w)

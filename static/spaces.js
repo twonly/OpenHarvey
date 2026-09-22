@@ -1,7 +1,7 @@
 import {t as tr,ui} from './i18n.js';
 import {accountLanguage} from './language-ui.js';
 import {setLoadingStatus} from './loading-ui.js';
-import {setupAuth,exchangeCallback,accountReady,signOut} from './account-ui.js?v=20260914-loading-all';
+import {setupAuth,exchangeCallback,accountReady,signOut} from './account-ui.js?v=20260921-tasks';
 import {accountIdentityHTML} from './account-identity.js';
 import {api,upload} from './api.js';
 import {filteredWorkspaces,workspaceRows} from './spaces-ui.js';

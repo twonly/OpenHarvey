@@ -18,6 +18,7 @@ class RuntimeError(Exception):
 class Runtime:
     def __init__(self, config):
         self.config = config
+        self.request_client = None
 
     def client(self, **kwargs):
         return httpx.AsyncClient(base_url=self.config["url"],
@@ -35,15 +36,18 @@ class Runtime:
         if tid:
             query["directory"] = self.directory(tid)
         try:
-            async with self.client() as client:
-                response = await client.request(method, path, params=query, json=body)
-                if response.status_code == 404 and allow_not_found:
-                    return None
-                if response.is_error:
-                    raise RuntimeError(f"OpenCode 请求失败（HTTP {response.status_code}），请重试或联系管理员")
-                if not response.content:
-                    return None
-                return response.json()
+            if self.request_client is not None:
+                response = await self.request_client.request(method, path, params=query, json=body)
+            else:
+                async with self.client() as client:
+                    response = await client.request(method, path, params=query, json=body)
+            if response.status_code == 404 and allow_not_found:
+                return None
+            if response.is_error:
+                raise RuntimeError(f"OpenCode 请求失败（HTTP {response.status_code}），请重试或联系管理员")
+            if not response.content:
+                return None
+            return response.json()
         except (httpx.HTTPError, ValueError) as exc:
             raise RuntimeError("OpenCode 暂时无法连接，请稍后重试；已保存的材料仍然保留") from exc
 
@@ -67,6 +71,9 @@ class Runtime:
         for path in [root + "/*", shared + "/*"] + [self.source_path(d["id"]).rsplit("/",1)[0]+"/*" for d in documents]:
             rules.append({"permission": "read", "pattern": relative(path), "action": "allow"})
         rules += [
+            {"permission": "memory", "pattern": "*", "action": "allow"},
+            {"permission": "read", "pattern": "*/.memory-capability", "action": "deny"},
+            {"permission": "edit", "pattern": relative(root + "/.memory-capability"), "action": "deny"},
             {"permission": "read", "pattern": "*/.publish-token", "action": "deny"},
             {"permission": "edit", "pattern": relative(root + "/*"), "action": action},
             {"permission": "edit", "pattern": relative(root + "/context.json"), "action": "deny"},
@@ -124,6 +131,7 @@ class Runtime:
                 model = provider["models"].get(mid)
                 if model and model.get("capabilities", {}).get("toolcall", True):
                     models.append({"id": f"{pid}/{mid}", "providerID": pid, "modelID": mid,
+                                   "providerLabel": config.get("provider", {}).get(pid, {}).get("name") or provider.get("name") or pid,
                                    "label": model.get("name") or mid})
         return {"models": models, "default": config.get("model")}
 
@@ -147,6 +155,16 @@ class Runtime:
     async def status(self, thread):
         values = await self.call("GET", "/session/status", tid=thread["id"])
         return values.get(thread["session_id"], {"type": "idle"})
+
+    async def last_assistant(self, thread):
+        before = None
+        while True:
+            params = {'limit': 10, **({'before': before} if before else {})}
+            page = await self.call('GET', f'/session/{thread["session_id"]}/message', tid=thread['id'], params=params)
+            info = next((m['info'] for m in reversed(page) if m['info']['role']=='assistant'), None)
+            if info is not None:return info
+            if len(page) < 10 or page[0]['info']['id'] == before:return {}
+            before = page[0]['info']['id']
 
     async def events(self, thread):
         async with self.client() as client:

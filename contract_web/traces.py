@@ -59,8 +59,12 @@ class Traces:
         credentials.append(self.runtime(u, t["id"]).config.get('password'))
         token = self.store.user_root(u['id'])/'threads'/t['id']/'.publish-token'
         if token.exists():credentials.append(token.read_text())
+        memory_token = token.with_name('.memory-capability')
+        if memory_token.exists():credentials.append(json.loads(memory_token.read_text()).get('token'))
         executions = self.store.all('SELECT * FROM execution_configs WHERE thread_id=? ORDER BY created', (t['id'],))
         configs = [(e, json.loads(e['config'])) for e in executions]
+        existing = {row['message_id']: row for row in self.store.all('SELECT message_id,execution_id,summary FROM trace_runs WHERE thread_id=?', (t['id'],))}
+        updates, execution_updates = [], []
         starts = [i for i,m in enumerate(messages) if m['info']['role']=='user' and any(p.get('type') in {'text','file'} and not p.get('synthetic') for p in m.get('parts',[]))]
         for n,start in enumerate(starts):
             end = starts[n+1] if n+1 < len(starts) else len(messages)
@@ -72,8 +76,6 @@ class Traces:
             if not matched and created:
                 matched = next(((e,c) for e,c in reversed(configs) if e['created'] <= created <= e['created']+30 and e['message_id'] in {None,mid}), None)
             execution_id = matched[0]['id'] if matched else None
-            if matched:
-                self.store.execute('UPDATE execution_configs SET message_id=? WHERE id=?', (mid,execution_id))
             assistants = [m for m in group if m['info']['role']=='assistant']
             errors = [public_error(m['info']['error']) for m in assistants if m['info'].get('error')]
             tool_errors = sum(p.get('state',{}).get('status')=='error' for m in group for p in m.get('parts',[]) if p.get('type')=='tool')
@@ -93,10 +95,16 @@ class Traces:
                        'tool_count':sum(p.get('type')=='tool' for m in group for p in m.get('parts',[])),
                        'configuration_status':'已记录' if matched else '历史版本未记录'}
             rid = hashlib.sha256((t['id']+':'+mid).encode()).hexdigest()[:24]
-            self.store.execute('INSERT INTO trace_runs VALUES(?,?,?,?,?,?,?) ON CONFLICT(thread_id,message_id) DO UPDATE SET execution_id=excluded.execution_id,summary=excluded.summary',
-                               (rid,t['id'],u['id'],mid,execution_id,created,encoded(summary)))
-            if matched:
-                self.store.execute('UPDATE execution_configs SET status=? WHERE id=?',(state,execution_id))
+            serialized = encoded(summary)
+            prior = existing.get(mid)
+            if not prior or prior['execution_id'] != execution_id or prior['summary'] != serialized:
+                updates.append((rid,t['id'],u['id'],mid,execution_id,created,serialized))
+            if matched and (matched[0]['message_id'] != mid or matched[0]['status'] != state):
+                execution_updates.append((mid,state,execution_id))
+        if updates or execution_updates:
+            with self.store.connect() as db:
+                db.executemany('INSERT INTO trace_runs VALUES(?,?,?,?,?,?,?) ON CONFLICT(thread_id,message_id) DO UPDATE SET execution_id=excluded.execution_id,summary=excluded.summary', updates)
+                db.executemany('UPDATE execution_configs SET message_id=?,status=? WHERE id=?', execution_updates)
 
     async def refresh(self, u):
         rows = self.store.all('SELECT t.* FROM threads t JOIN workspaces w ON w.id=t.workspace_id WHERE w.user_id=? AND t.deleted_at IS NULL ORDER BY t.created DESC LIMIT 100',(u['id'],))
@@ -106,7 +114,7 @@ class Traces:
                 try:
                     rt=self.runtime(u,t['id'])
                     messages,status=await asyncio.gather(rt.messages(t),rt.status(t))
-                    self.sync(u,t,messages,status)
+                    await asyncio.to_thread(self.sync,u,t,messages,status)
                     return None
                 except RuntimeError as e:
                     return str(e)
@@ -129,6 +137,8 @@ class Traces:
         credentials=[rt.config.get('password'), *self.credentials(self.models.scope(u))]
         token=self.store.user_root(u['id'])/'threads'/t['id']/'.publish-token'
         if token.exists():credentials.append(token.read_text())
+        memory_token = token.with_name('.memory-capability')
+        if memory_token.exists():credentials.append(json.loads(memory_token.read_text()).get('token'))
         # Collect only configured credentials for exact replacement in text fields.
         try:
             config=await rt.call('GET','/config',tid=t['id'])

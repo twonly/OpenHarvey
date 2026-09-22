@@ -71,8 +71,10 @@ body.reading-wide #appShell{grid-template-columns:minmax(0,1fr)!important}body.r
 #sourceOutline [data-outline] span{flex:1;min-width:0;overflow-wrap:anywhere}#sourceOutline [data-outline] small{flex:none;color:var(--ink-3);font-size:10px}
 #sourceOutline [data-outline]:hover{background:var(--surface)}#sourceOutline [aria-current]{background:var(--accent-soft);color:var(--accent)}
 .outline-empty{padding:14px 12px;color:var(--ink-2);line-height:1.7}.outline-empty small{display:block;margin-top:8px;color:var(--ink-3);font-size:11px}
-::highlight(source-search){background-color:#fff1a8;color:#182230}
-::highlight(source-search-current){background-color:#dbeafe;color:#182230;text-decoration:underline;text-decoration-color:#3b82f6;text-decoration-thickness:1.5px}
+/* Keep reader highlights out of the native DOCX canvas: global highlight inheritance
+   crashes Chromium when SuperDoc selects an image node. */
+#sourceContent::highlight(source-search){background-color:#fff1a8;color:#182230}
+#sourceContent::highlight(source-search-current){background-color:#dbeafe;color:#182230;text-decoration:underline;text-decoration-color:#3b82f6;text-decoration-thickness:1.5px}
 /* Blend the overlay with the PDF image so its black glyphs stay black. */
 .pdf-text-layer{mix-blend-mode:multiply}
 .pdf-text-layer ::highlight(source-search){background-color:#facc152e;color:transparent}

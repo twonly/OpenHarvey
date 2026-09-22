@@ -5,6 +5,7 @@ import json
 import os
 import sys
 import time
+import uuid
 from pathlib import Path
 
 
@@ -17,6 +18,8 @@ def submit(filename, timeout=120):
         p=(root/body.pop('content_file')).resolve()
         if not p.is_relative_to(root):raise ValueError('正文必须位于当前对话目录')
         body['content']=p.read_text()
+    if body.get('kind')=='redline' and body.get('action','inspect') in {'inspect','find','diff'}:
+        body['read_id']=uuid.uuid4().hex  # Reads must never replay a cached E2B snapshot.
     context=json.loads((root/'context.json').read_text())
     payload=json.dumps(body,ensure_ascii=False,sort_keys=True,separators=(',',':'))
     if len(payload.encode())>4_000_000:raise ValueError('报告超过 4 MB')
@@ -37,6 +40,6 @@ def submit(filename, timeout=120):
 if __name__=='__main__':
     try:
         if len(sys.argv)!=2:raise ValueError('用法：python3 submit.py 报告.json')
-        result=submit(sys.argv[1]);print(json.dumps(result,ensure_ascii=False));sys.exit(0 if result.get('saved') else 1)
+        result=submit(sys.argv[1]);print(json.dumps(result,ensure_ascii=False));sys.exit(0 if (result.get('saved') or result.get('ok')) else 1)
     except Exception as exc:
         print(json.dumps({'saved':False,'error':str(exc)},ensure_ascii=False));sys.exit(1)

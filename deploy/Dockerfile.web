@@ -9,6 +9,13 @@ FROM node:22-bookworm-slim AS feishu-cli
 RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates && rm -rf /var/lib/apt/lists/*
 RUN npm install -g --prefix /opt/feishu @larksuite/cli@1.0.76
 
+FROM node:22-bookworm-slim AS redline-build
+WORKDIR /build
+COPY package.json package-lock.json ./
+RUN npm ci
+COPY scripts/build_redline.mjs ./scripts/build_redline.mjs
+RUN npm run build:redline && npm prune --omit=dev
+
 FROM python:3.12-slim-bookworm
 WORKDIR /app
 COPY requirements.txt .
@@ -16,6 +23,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY contract_web ./contract_web
 COPY static ./static
 COPY runtime ./runtime
+COPY scripts/superdoc-engine.mjs ./scripts/superdoc-engine.mjs
+COPY --from=redline-build /build/node_modules ./node_modules
+COPY --from=redline-build /build/static/vendor ./static/vendor
 COPY --from=feishu-build /out/feishu-credential-adapter /usr/local/bin/feishu-credential-adapter
 COPY --from=feishu-cli /usr/local/bin/node /usr/local/bin/node
 COPY --from=feishu-cli /opt/feishu /opt/feishu

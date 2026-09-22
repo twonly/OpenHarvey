@@ -11,3 +11,5 @@ Third-party browser libraries, if included under static/vendor, retain their ori
 All bundled sample contract and risk values are fictional examples, not any organization's internal policy or legal advice.
 
 The optional Feishu / Lark integration uses larksuite/cli v1.0.76 (MIT). Its upstream license and notices remain in the installed package and source distribution.
+
+DOCX review uses SuperDoc 1.46.3 (AGPL-3.0), pinned in package-lock.json. Generated bundles retain third-party license notices. See docs/memory-and-review.md.

@@ -75,3 +75,5 @@ body>header #username{min-width:0;max-width:120px;overflow:hidden;text-overflow:
 @media(max-width:759px){body>header #username{max-width:48px;font-size:10px}}
 
 .loading-status{display:inline-flex;align-items:center;gap:10px}.auth-loading .loading-status{margin:0;text-align:center}.auth-loading button{font:inherit;padding:8px 16px;background:var(--paper,#fff);border:1px solid var(--line,#dce3ec);border-radius:7px;color:inherit;cursor:pointer}
+
+.account-usage .usage-dismiss{display:inline-grid;place-items:center;margin-left:auto;width:26px;height:26px;flex:none;padding:0;border:0;background:transparent;color:inherit;font-size:20px;cursor:pointer}.usage-error:empty{display:none}

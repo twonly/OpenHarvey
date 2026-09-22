@@ -11,7 +11,7 @@ from contract_web.marketing import register_marketing
 ROOT = Path(__file__).resolve().parents[1]
 
 PUBLIC_PATHS = ['/', '/en'] + [p+'/'+s for s in ('security','open-source','harvey-alternative','features') for p in ('','/en')]
-WORKBENCH_PATHS = ['/connectors','/demo','/spaces','/guide','/login','/agent','/model','/config','/traces','/ops','/ops/:path*','/skills','/risks','/members','/organization','/health','/api/:path*','/auth/:path*','/orca/:path*','/trial-model/:path*','/static/:path*']
+WORKBENCH_PATHS = ['/labs','/connectors','/demo','/spaces','/guide','/login','/agent','/model','/config','/traces','/ops','/ops/:path*','/skills','/risks','/members','/organization','/health','/api/:path*','/auth/:path*','/orca/:path*','/trial-model/:path*','/static/:path*']
 
 def hosting_config(workbench_origin):
     origin=workbench_origin.rstrip('/')

@@ -167,13 +167,18 @@ def extract_pdf_mapped(path: Path) -> tuple[str, dict]:
     raw_lines: list[tuple[str, int, list[float]]] = []
     with pdfplumber.open(str(path)) as pdf:
         for pno, page in enumerate(pdf.pages, 1):
-            pages.append({"w": round(page.width, 2), "h": round(page.height, 2)})
-            for ln in page.extract_text_lines(return_chars=False):
-                text = (ln.get("text") or "").strip()
-                if text:
-                    raw_lines.append((text, pno, [
-                        round(ln["x0"], 2), round(ln["top"], 2),
-                        round(ln["x1"], 2), round(ln["bottom"], 2)]))
+            try:
+                pages.append({"w": round(page.width, 2), "h": round(page.height, 2)})
+                for ln in page.extract_text_lines(return_chars=False):
+                    text = (ln.get("text") or "").strip()
+                    if text:
+                        raw_lines.append((text, pno, [
+                            round(ln["x0"], 2), round(ln["top"], 2),
+                            round(ln["x1"], 2), round(ln["bottom"], 2)]))
+            finally:
+                # PDF retains every Page; release character/layout caches before
+                # parsing the next page instead of holding the whole document.
+                page.close()
 
     if sum(len(t) for t, _, _ in raw_lines) < 50:
         raise ExtractError(

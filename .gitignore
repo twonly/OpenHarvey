@@ -1,4 +1,7 @@
 .venv/
+node_modules/
+static/vendor/
+.cache/
 __pycache__/
 *.pyc
 data/

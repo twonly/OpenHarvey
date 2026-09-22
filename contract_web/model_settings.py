@@ -53,6 +53,10 @@ class Models:
             with os.fdopen(fd,'wb') as f:f.write(Fernet.generate_key())
         self.cipher=Fernet(keypath.read_bytes())
         self.migrate_personal()
+        with self.store.connect() as db:
+            columns={r[1] for r in db.execute('PRAGMA table_info(providers)')}
+            if 'protocol' not in columns:db.execute("ALTER TABLE providers ADD COLUMN protocol TEXT NOT NULL DEFAULT 'openai'")
+            if 'extra_body' not in columns:db.execute("ALTER TABLE providers ADD COLUMN extra_body TEXT NOT NULL DEFAULT '{}'")
 
     @staticmethod
     def scope(u):
@@ -67,7 +71,7 @@ class Models:
                 return
             for u in db.execute("SELECT id,org_id FROM users WHERE username='admin'").fetchall():
                 scope = self.scope(u)
-                db.execute('INSERT OR IGNORE INTO providers SELECT ?,id,label,base_url,models,secret,enabled,revision FROM providers WHERE org_id=?', (scope,u['org_id']))
+                db.execute('INSERT OR IGNORE INTO providers(org_id,id,label,base_url,models,secret,enabled,revision) SELECT ?,id,label,base_url,models,secret,enabled,revision FROM providers WHERE org_id=?', (scope,u['org_id']))
                 for v in db.execute('SELECT * FROM model_versions WHERE org_id=?',(u['org_id'],)).fetchall():
                     rows=json.loads(v['content'])
                     for row in rows:row['org_id']=scope
@@ -78,7 +82,7 @@ class Models:
     def decrypt(self,key):return self.cipher.decrypt(key.encode()).decode() if key else None
 
     def rows(self,org):
-        return [{**r,'models':json.loads(r['models'])} for r in self.store.all('SELECT * FROM providers WHERE org_id=? ORDER BY id',(org,))]
+        return [{**r,'models':json.loads(r['models']),'extra_body':json.loads(r['extra_body'])} for r in self.store.all('SELECT * FROM providers WHERE org_id=? ORDER BY id',(org,))]
 
     def public(self,org):
         return [{k:v for k,v in r.items() if k!='secret'}|{'key_configured':bool(r['secret'])} for r in self.rows(org)]
@@ -103,12 +107,35 @@ class Models:
         key=key.strip() if key and key.strip() else None if body.get('clear_key') else self.decrypt(existing['secret']) if existing else None
         return base,key
 
+    @staticmethod
+    def protocol(body):
+        value=body.get('protocol','openai')
+        if not isinstance(value,str) or value not in {'openai','anthropic'}:raise ValueError('接口协议无效')
+        return value
+
+    @staticmethod
+    def extra_body(body):
+        value=body.get('extra_body',{})
+        if not isinstance(value,dict):raise ValueError('额外请求参数必须是 JSON 对象')
+        try:text=json.dumps(value,allow_nan=False)
+        except (ValueError,TypeError):raise ValueError('额外请求参数必须是合法 JSON 对象') from None
+        if len(text)>32000:raise ValueError('额外请求参数最多 32000 字符')
+        if set(value)&{'model','messages','stream','tools','tool_choice','system'}:
+            raise ValueError('额外请求参数不能覆盖 model、messages、stream、tools、tool_choice 或 system')
+        return value
+
+    @staticmethod
+    def native_base(base,protocol):
+        # Anthropic's SDK appends /messages; official host needs the /v1 prefix.
+        return base+'/v1' if protocol=='anthropic' and urlsplit(base).path in {'','/'} else base
+
     async def discover(self, org, body, public_only=False):
         base,key=self.connection(org,body)
+        protocol=self.protocol(body);base=self.native_base(base,protocol)
         from .traces import redact
         try:
             async with asyncio.timeout(15), httpx.AsyncClient(timeout=15,trust_env=False,follow_redirects=False) as client:
-                target=httpx.URL(base+'/models');headers={'Authorization':'Bearer '+key} if key else {};extensions={}
+                target=httpx.URL(base+'/models');headers=({'x-api-key':key or '', 'anthropic-version':'2023-06-01'} if protocol=='anthropic' else {'Authorization':'Bearer '+key} if key else {});extensions={}
                 if public_only:
                     addresses=await asyncio.get_running_loop().getaddrinfo(target.host,target.port or (443 if target.scheme=='https' else 80),type=socket.SOCK_STREAM)
                     if not addresses or any(not ipaddress.ip_address(a[4][0]).is_global for a in addresses):
@@ -161,7 +188,7 @@ class Models:
             cleaned.append({'id':mid,'label':name,'context':context,'output':output,'enabled':bool(m.get('enabled',True)),'native':native})
         key=body.get('key')
         if key is not None and (not isinstance(key,str) or len(key)>10000):raise ValueError('密钥格式无效')
-        return {'id':pid,'label':label,'base_url':base,'models':cleaned,'enabled':bool(body.get('enabled',True))}
+        return {'id':pid,'label':label,'base_url':base,'models':cleaned,'protocol':self.protocol(body),'extra_body':self.extra_body(body),'enabled':bool(body.get('enabled',True))}
 
     def save(self,u,body):
         value=self.validate(body);
@@ -173,15 +200,33 @@ class Models:
             if (old['revision'] if old else 0)!=body.get('revision',0):raise HTTPException(409,'供应商配置已更新，请重新打开后保存')
             key=self.encrypt(body['key'].strip()) if body.get('key') else (None if body.get('clear_key') else old['secret'] if old else None)
             revision=(old['revision'] if old else 0)+1
-            db.execute('INSERT INTO providers VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(org_id,id) DO UPDATE SET label=excluded.label,base_url=excluded.base_url,models=excluded.models,secret=excluded.secret,enabled=excluded.enabled,revision=excluded.revision',
-                       (org,pid,value['label'],value['base_url'],encoded(value['models']),key,int(value['enabled']),revision))
+            db.execute('INSERT INTO providers(org_id,id,label,base_url,models,secret,enabled,revision,protocol,extra_body) VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(org_id,id) DO UPDATE SET label=excluded.label,base_url=excluded.base_url,models=excluded.models,secret=excluded.secret,enabled=excluded.enabled,revision=excluded.revision,protocol=excluded.protocol,extra_body=excluded.extra_body',
+                       (org,pid,value['label'],value['base_url'],encoded(value['models']),key,int(value['enabled']),revision,value['protocol'],encoded(value['extra_body'])))
             rows=[dict(r) for r in db.execute('SELECT * FROM providers WHERE org_id=? ORDER BY id',(org,))]
-            for r in rows:r['models']=json.loads(r['models'])
+            for r in rows:
+                r['models']=json.loads(r['models']);r['extra_body']=json.loads(r['extra_body'])
             version=(db.execute('SELECT MAX(revision) FROM model_versions WHERE org_id=?',(org,)).fetchone()[0] or 0)+1
             db.execute('INSERT INTO model_versions(org_id,revision,content,created) VALUES(?,?,?,?)',(org,version,encoded(rows),time.time()))
             db.execute('UPDATE runtime_instances SET desired_revision=?,error=NULL WHERE user_id=?',(version,u['id']))
         self.settings.audit(u,'provider.save',pid)
         return {'provider':next(p for p in self.public(org) if p['id']==pid),'revision':version}
+
+    def delete(self,u,pid,revision):
+        org=self.scope(u)
+        with self.store.connect() as db:
+            db.execute('BEGIN IMMEDIATE')
+            old=db.execute('SELECT revision FROM providers WHERE org_id=? AND id=?',(org,pid)).fetchone()
+            if not old:raise HTTPException(404,'供应商不存在')
+            if old['revision']!=revision:raise HTTPException(409,'供应商配置已更新，请重新打开后删除')
+            db.execute('DELETE FROM providers WHERE org_id=? AND id=?',(org,pid))
+            rows=[dict(r) for r in db.execute('SELECT * FROM providers WHERE org_id=? ORDER BY id',(org,))]
+            for r in rows:
+                r['models']=json.loads(r['models']);r['extra_body']=json.loads(r['extra_body'])
+            version=(db.execute('SELECT MAX(revision) FROM model_versions WHERE org_id=?',(org,)).fetchone()[0] or 0)+1
+            db.execute('INSERT INTO model_versions(org_id,revision,content,created) VALUES(?,?,?,?)',(org,version,encoded(rows),time.time()))
+            db.execute('UPDATE runtime_instances SET desired_revision=?,error=NULL WHERE user_id=?',(version,u['id']))
+        self.settings.audit(u,'provider.delete',pid)
+        return {'revision':version}
 
     def native(self,rows):
         providers={};auth={}
@@ -189,9 +234,12 @@ class Models:
             if not row['enabled']:continue
             models={m['id']:{**m.get('native',{}),'name':m['label'],'limit':{'context':m['context'],'output':m['output']}} for m in row['models'] if m['enabled']}
             if not models:continue
-            providers[row['id']]={'name':row['label'],'options':{'baseURL':row['base_url']},'models':models}
-            if row['id'] != 'deepseek':
-                providers[row['id']]['npm']='@ai-sdk/openai-compatible'
+            protocol=row.get('protocol','openai')
+            providers[row['id']]={'name':row['label'],'npm':'@ai-sdk/anthropic' if protocol=='anthropic' else '@ai-sdk/openai-compatible',
+                'options':{'baseURL':self.native_base(row['base_url'],protocol)},'models':models}
+            # Preserve the existing DeepSeek adapter for saved DeepSeek IDs.
+            if row['id']=='deepseek' and protocol=='openai':providers[row['id']].pop('npm')
+            if row.get('extra_body'):providers[row['id']]['options']['workbenchExtraBody']=row['extra_body']
             auth[row['id']]=self.decrypt(row.get('secret'))
         first=next((pid+'/'+mid for pid,p in providers.items() for mid in p['models']),None)
         config={'provider':providers,'enabled_providers':list(providers)}
@@ -211,7 +259,7 @@ class Models:
             if not p.get('models'):continue
             body={'id':pid,'label':p.get('name') or pid,'base_url':p.get('options',{}).get('baseURL',''),'models':[
                 {'id':mid,'label':m.get('name') or mid,'native':{k:v for k,v in m.items() if k in {'reasoning','tool_call','interleaved'}},'context':m.get('limit',{}).get('context',128000),'output':m.get('limit',{}).get('output',8192)} for mid,m in p['models'].items()],
-                'key':p.get('options',{}).get('apiKey'),'revision':0}
+                'protocol':'anthropic' if p.get('npm')=='@ai-sdk/anthropic' else 'openai','extra_body':p.get('options',{}).get('workbenchExtraBody',{}),'key':p.get('options',{}).get('apiKey'),'revision':0}
             if body['base_url']:
                 self.save({**u,'role':'admin'},body)
         self.store.execute('UPDATE model_versions SET validated=1 WHERE org_id=?',(self.scope(u),))

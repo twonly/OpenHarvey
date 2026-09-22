@@ -14,19 +14,21 @@ export function preferenceValues(previous,entries){
   for(const [key,value]of entries){if(value==='')delete values[key];else values[key]=value;}
   return values;
 }
-export function setupSettings({notice,onClose}){
+export function setupSettings({notice,onClose,onOpen}){
   const root=document.createElement('section');root.id='settingsView';root.hidden=true;root.setAttribute('aria-label',tr('工作台设置'));document.body.append(root);
   let identity=null,tab='general',dirty=false,returnURL='',items=[],selected=null,files={},generation=0;
   const $=sel=>root.querySelector(sel);
   const run=fn=>async(...args)=>{try{await fn(...args);}catch(e){notice(e.message);}};
   document.addEventListener('ui-language-changed',()=>{if(!root.hidden&&!dirty)void render();});
+  document.addEventListener('memory-changed',()=>{if(!root.hidden&&tab==='labs'&&!dirty)void render().catch(e=>notice(e.message));});
+  window.addEventListener('focus',()=>{if(!root.hidden&&tab==='labs'&&!dirty)void render().catch(e=>notice(e.message));});
   const leave=()=>!dirty||confirm(tr('有尚未保存的修改，确定离开？'));
   const field=(label,name,value='',extra='')=>`<label>${esc(label)}<input name="${name}" value="${esc(value??'')}" ${extra}></label>`;
   const area=(label,name,value='',rows=4,extra='')=>`<label>${esc(label)}<textarea name="${name}" rows="${rows}" ${extra}>${esc(value??'')}</textarea></label>`;
   const select=(label,name,value,options)=>`<label>${esc(label)}<select name="${name}">${options.map(([v,l])=>`<option value="${esc(v)}" ${v===value?'selected':''}>${esc(l)}</option>`).join('')}</select></label>`;
   function shell(){
     root.setAttribute('aria-label',tr('工作台设置'));
-    root.innerHTML=ui`<div class="settings-nav"><div class="settings-title"><b>设置</b><button data-close aria-label="返回工作台">×</button></div><nav aria-label="设置导航">${[['general',tr('通用设置')],['skills','Skills'],['risks',tr('风险库')],['traces',tr('执行记录')],['providers',tr('模型与服务')],...(identity.capabilities?.feishu?[['connectors',tr('连接器')]]:[]),...(identity.role==='admin'?[['members',tr('用户管理')]]:[])].map(([id,label])=>`<button data-tab="${id}" aria-current="${tab===id?'page':'false'}">${label}</button>`).join('')}</nav><p>${identity.account_kind==='demo'?tr('免登录体验'):tr('我的账户')}<br><span>${accountIdentityHTML(identity)} · ${identity.role==='admin'?tr('平台管理员'):identity.account_kind==='demo'?'demo':tr('个人用户')}</span></p><a class="settings-guide-link" href="/guide" target="_blank" rel="noopener">设置指南 ↗</a><button data-close class="settings-back">← 返回工作台</button></div><div class="settings-content"><div id="settingsPage"></div></div>`;
+    root.innerHTML=ui`<div class="settings-nav"><div class="settings-title"><b>设置</b><button data-close aria-label="返回工作台">×</button></div><nav aria-label="设置导航">${[['general',tr('通用设置')],['labs','Labs'],['skills','Skills'],['risks',tr('风险库')],['traces',tr('执行记录')],['providers',tr('模型与服务')],...(identity.capabilities?.feishu?[['connectors',tr('连接器')]]:[]),...(identity.role==='admin'?[['members',tr('用户管理')]]:[])].map(([id,label])=>`<button data-tab="${id}" aria-current="${tab===id?'page':'false'}">${label}</button>`).join('')}</nav><p>${identity.account_kind==='demo'?tr('免登录体验'):tr('我的账户')}<br><span>${accountIdentityHTML(identity)} · ${identity.role==='admin'?tr('平台管理员'):identity.account_kind==='demo'?'demo':tr('个人用户')}</span></p><a class="settings-guide-link" href="/guide" target="_blank" rel="noopener">设置指南 ↗</a><button data-close class="settings-back">← 返回工作台</button></div><div class="settings-content"><div id="settingsPage"></div></div>`;
     $('[aria-current="page"]').scrollIntoView({block:'nearest',inline:'nearest'});
   }
   function route(next,mode){if(mode!=='none'&&location.pathname!==settingsPaths[next])history[mode==='replace'?'replaceState':'pushState'](null,'',settingsPaths[next]);}
@@ -37,7 +39,7 @@ export function setupSettings({notice,onClose}){
     if(root.hidden)returnURL=settingsTab(location.pathname)?savedWorkbenchURL(sessionStorage.getItem('workbench-location')):location.pathname+location.search+location.hash;
     document.getElementById('workspaceSwitcher').open=false;
     document.getElementById('appShell').inert=true;
-    root.hidden=false;tab=next;dirty=false;route(next,historyMode);
+    root.hidden=false;tab=next;dirty=false;route(next,historyMode);onOpen?.();
     try{await render();}catch(error){$('#settingsPage').innerHTML='<p class="settings-empty" role="alert">'+esc(error.message)+'</p>';throw error;}
   }
   async function close({historyMode='push'}={}){
@@ -51,8 +53,12 @@ export function setupSettings({notice,onClose}){
     if(tab==='members'){await renderUsers($('#settingsPage'),notice);return;}
     if(tab==='providers'&&identity.account_kind==='demo'){$('#settingsPage').replaceChildren();orcaConnect($('#settingsPage'),identity);return;}
     if(['providers','members'].includes(tab)){
-      const {renderAdmin}=await import('./admin-ui.js?v=20260911-14');if(g!==generation)return;
+      const {renderAdmin}=await import('./admin-ui.js?v=20260916-provider-config');if(g!==generation)return;
       await renderAdmin($('#settingsPage'),{mode:tab,identity,notice,dirty:value=>dirty=value,leave});if(g===generation)orcaConnect($('#settingsPage'),identity);return;
+    }
+    if(tab==='labs'){
+      const {renderLabs}=await import('./memory-ui.js');if(g!==generation)return;
+      await renderLabs($('#settingsPage'),{notice,dirty:value=>dirty=value,isCurrent:()=>g===generation});return;
     }
     if(tab==='connectors'){
       const {renderConnectors}=await import('./connectors-ui.js');if(g!==generation)return;
@@ -89,10 +95,10 @@ export function setupSettings({notice,onClose}){
   }
   function editor(item){
     selected=item;files={...(item?.content.files||{})};const c=item?.content||{},readonly=item&&!item.editable;
-    $('#skillEditor').innerHTML=ui`<form id="skillForm" class="settings-form"><div class="settings-editor-head"><h3>${item?tr('编辑 Skill'):tr('新建 Skill')}</h3>${item?ui`<span class="settings-tag">${scopes[item.scope]} · v${item.revision}</span><button type="button" data-copy-skill>复制到我的 Skills</button>`:''}</div>${readonly?tr('<p class="settings-note">此 Skill 只读。复制为个人 Skill 后可以调整。</p>'):''}<fieldset ${readonly?'disabled':''}>${field(tr('显示名称'),'label',c.label,'required maxlength="100"')}${area(tr('用途说明'),'description',c.description,2,tr('required maxlength="1024" placeholder="说明什么时候使用这个 Skill"'))}${area(tr('Markdown 正文'),'body',c.body,16,tr('required maxlength="100000" placeholder="描述任务步骤、要求与输出格式…"'))}<div class="settings-reference-head"><b>参考文件</b><label class="settings-file-add">＋ 添加 Markdown / TXT<input id="skillFiles" type="file" accept=".md,.txt" multiple hidden></label></div><div id="skillFileList"></div><details><summary>高级选项</summary>${item?ui`<p>调用名称：<code>${esc(item.name)}</code></p>`:field(tr('调用名称'),'name','',tr('pattern="[a-z0-9]+(-[a-z0-9]+)*" maxlength="40" placeholder="自动生成，也可填写 payment-check"'))}${!item&&identity.role==='admin'?select(tr('适用范围'),'scope','personal',[['personal',tr('我的 Skill')],['public',tr('公开示例 Skill')]]):''}<label class="settings-check"><input type="checkbox" name="enabled" ${!item||item.enabled?'checked':''}>启用此 Skill</label></details></fieldset>${!readonly?tr('<div class="settings-form-actions"><button type="submit" class="primary">保存 Skill</button>')+ (item?tr('<button type="button" data-delete-skill class="settings-danger">删除</button>'):'')+'</div>':''}<div id="skillVersions"></div></form>`;
+    $('#skillEditor').innerHTML=ui`<form id="skillForm" class="settings-form"><div class="settings-editor-head"><h3>${item?tr('编辑 Skill'):tr('新建 Skill')}</h3>${item?ui`<span class="settings-tag">${scopes[item.scope]} · v${item.revision}</span><button type="button" data-copy-skill>复制到我的 Skills</button>`:''}</div>${readonly?tr('<p class="settings-note">此 Skill 只读。复制为个人 Skill 后可以调整。</p>'):''}<fieldset ${readonly?'disabled':''}>${field(tr('Skill 名称'),'label',c.label,'required maxlength="100"')}${area(tr('用途说明'),'description',c.description,2,tr('required maxlength="1024" placeholder="说明什么时候使用这个 Skill"'))}${area(tr('Markdown 正文'),'body',c.body,16,tr('required maxlength="100000" placeholder="描述任务步骤、要求与输出格式…"'))}<div class="settings-reference-head"><b>参考文件</b><label class="settings-file-add">＋ 添加 Markdown / TXT<input id="skillFiles" type="file" accept=".md,.txt" multiple hidden></label></div><div id="skillFileList"></div><details><summary>高级选项</summary>${!item&&identity.role==='admin'?select(tr('适用范围'),'scope','personal',[['personal',tr('我的 Skill')],['public',tr('公开示例 Skill')]]):''}<label class="settings-check"><input type="checkbox" name="enabled" ${!item||item.enabled?'checked':''}>启用此 Skill</label></details></fieldset>${!readonly?tr('<div class="settings-form-actions"><button type="submit" class="primary">保存 Skill</button>')+ (item?tr('<button type="button" data-delete-skill class="settings-danger">删除</button>'):'')+'</div>':''}<div id="skillVersions"></div></form>`;
     renderFiles(readonly);
     $('#skillFiles').onchange=run(async e=>{for(const f of e.target.files){if(!/\.(md|txt)$/i.test(f.name)||f.size>500000)throw new Error(tr('参考文件仅支持 Markdown / TXT，每个最多 500 KB'));const path='references/'+f.name;if(files[path]!==undefined&&!confirm(ui`替换参考文件 ${f.name}？`))continue;files[path]=await f.text();}dirty=true;renderFiles(false);e.target.value='';});
-    $('#skillForm').onsubmit=run(async e=>{e.preventDefault();const f=e.target,d=Object.fromEntries(new FormData(f));const body={content:{label:d.label,description:d.description,body:d.body,files},enabled:d.enabled==='on',revision:item?.revision,name:d.name||undefined,scope:d.scope||'personal'};const saved=await api('/api/skills'+(item?'/'+item.id:''),{method:item?'PUT':'POST',body});dirty=false;items=await api('/api/skills');renderList();editor(saved);notice(tr('Skill 已保存。'));});
+    $('#skillForm').onsubmit=run(async e=>{e.preventDefault();const f=e.target,d=Object.fromEntries(new FormData(f));const body={content:{label:d.label,description:d.description,body:d.body,files},enabled:d.enabled==='on',revision:item?.revision,scope:d.scope||'personal'};const saved=await api('/api/skills'+(item?'/'+item.id:''),{method:item?'PUT':'POST',body});dirty=false;items=await api('/api/skills');renderList();editor(saved);notice(tr('Skill 已保存。'));});
     if(item){
       $('[data-copy-skill]').onclick=run(async()=>{if(!leave())return;const copy=await api(`/api/skills/${item.id}/copy`,{method:'POST',body:{}});dirty=false;items=await api('/api/skills');editor(copy);renderList();notice(tr('已复制到我的 Skills。'));});
       if(!readonly)$('[data-delete-skill]').onclick=run(async()=>{if(!confirm(ui`删除“${c.label}”？历史执行仍保留原版本。`))return;await api(`/api/skills/${item.id}?revision=${item.revision}`,{method:'DELETE'});dirty=false;selected=null;await render();notice(tr('Skill 已删除。'));});
@@ -107,8 +113,8 @@ export function setupSettings({notice,onClose}){
   function renderFiles(readonly){
     $('#skillFileList').innerHTML=Object.entries(files).map(([path,body])=>ui`<details class="settings-reference"><summary>${esc(path)} <small>${body.length} 字</small></summary><textarea aria-label="${esc(path)}" data-reference="${esc(path)}" rows="8" ${readonly?'readonly':''}>${esc(body)}</textarea>${!readonly?ui`<button type="button" data-remove-reference="${esc(path)}">移除文件</button>`:''}</details>`).join('')||tr('<p class="settings-note">可以添加任务说明、示例或业务参考资料。</p>');
   }
-  root.addEventListener('input',e=>{if(['risks','traces','providers','members','connectors'].includes(tab))return;if(e.target.id==='skillSearch'){renderList();return;}dirty=true;if(e.target.dataset.reference)files[e.target.dataset.reference]=e.target.value;});
-  root.addEventListener('change',e=>{if(['risks','traces','providers','members','connectors'].includes(tab))return;if(e.target.id==='skillScope')renderList();else dirty=true;});
+  root.addEventListener('input',e=>{if(['risks','traces','providers','members','connectors','labs'].includes(tab))return;if(e.target.id==='skillSearch'){renderList();return;}dirty=true;if(e.target.dataset.reference)files[e.target.dataset.reference]=e.target.value;});
+  root.addEventListener('change',e=>{if(['risks','traces','providers','members','connectors','labs'].includes(tab))return;if(e.target.id==='skillScope')renderList();else dirty=true;});
   root.addEventListener('click',run(async e=>{
     const b=e.target.closest('button');if(!b)return;
     if(b.hasAttribute('data-close'))await close();

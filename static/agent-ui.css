@@ -41,3 +41,7 @@ button:focus-visible,summary:focus-visible,select:focus-visible,input:focus-visi
 
 .compaction-record{border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin:8px 0}.compaction-record>summary{cursor:pointer;display:flex;align-items:center;gap:12px;list-style:disclosure-closed}.compaction-record>summary small{margin-left:auto;color:var(--muted)}.compaction-record[open]>summary{margin-bottom:10px}.compaction-record>.markdown{max-height:360px;overflow:auto}.chat-message.process .byline{color:var(--muted)}
 .compaction-record>summary::before{content:'›';font-size:18px;line-height:1}.compaction-record[open]>summary::before{transform:rotate(90deg)}
+
+.model-picker option:disabled{color:#9ca3af}
+
+.task-panel{position:relative}.task-panel .bui-tasks summary{padding-right:40px}.tasks-dismiss{position:absolute;right:8px;top:8px;z-index:1;display:grid;place-items:center;width:26px;height:26px;padding:0;border:0;background:transparent;color:var(--muted);cursor:pointer}.tasks-recovery{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;padding:8px 12px;color:var(--muted);font-size:12px}.tasks-recovery button{flex:none}

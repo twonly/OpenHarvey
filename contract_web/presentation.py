@@ -5,7 +5,9 @@ from .report_processing import merge_citations
 
 
 class PublicView:
-    def __init__(self, paths=None, locale='zh-CN'):
+    def __init__(self, paths=None, locale='zh-CN', memory=None, skills=None):
+        self.memory = memory
+        self.skills = skills or {}
         self.locale = 'en' if locale == 'en' else 'zh-CN'
         self.paths = paths or {}
         self.text_parts = {}
@@ -21,6 +23,7 @@ class PublicView:
                 'This operation was not run because it accessed a directory outside this conversation. Use the exact material path in the current conversation directory.',
             '该操作被当前权限规则禁止，未执行。': 'This operation was not run because the current permission rules prohibit it.',
             '你已拒绝本次操作，未执行。': 'You rejected this operation; it was not run.',
+            '所选 Skill': 'Selected skill',
         }
         return (labels.get(text, text) if self.locale == 'en' else text).format(**values)
 
@@ -59,14 +62,16 @@ class PublicView:
         return value
 
     def info(self, info):
+        if self.memory: self.memory.info(info)
         return self.clean({k: v for k, v in info.items() if k in {
             "id", "sessionID", "role", "time", "finish", "error", "parentID", "summary", "mode"}})
 
     def part(self, part):
         base = {k: part[k] for k in ("id", "messageID", "sessionID", "type") if k in part}
+        if self.memory: base.update(self.memory.part(part))
         if part.get("type") == "text":
             self.text_parts[part.get("id")] = dict(part)
-            return {**base, "text": self.text(part.get("text")),
+            return {**base, "text": self.text(re.sub(r"\[\[memory:[^\]\n]*\]\]", "", part.get("text") or "")),
                     **({'synthetic':True} if part.get('synthetic') is True else {}),
                     **({'metadata':{'compaction_continue':True}} if (part.get('metadata') or {}).get('compaction_continue') is True else {})}
         if part.get("type") == "file":
@@ -74,6 +79,8 @@ class PublicView:
         state, tool = part.get("state", {}), part.get("tool", "")
         inp = state.get("input", {})
         target = inp.get("filePath") or inp.get("path") or inp.get("name") or ""
+        if tool == 'skill':
+            target = self.skills.get(inp.get('name')) or self.label('所选 Skill')
         details = []
         if target:
             details.append(self.text(target))
@@ -92,6 +99,8 @@ class PublicView:
             details += [self.text(t.get("content")) for t in inp.get("todos", []) if isinstance(t, dict)]
         if state.get("error"):
             error = state["error"]
+            if tool == 'skill' and inp.get('name'):
+                error = error.replace(inp['name'], target)
             if "The user has specified a rule" in error:
                 error = self.label("操作触及当前对话允许范围外的目录，未执行。请在当前对话目录使用材料索引中的准确路径。"
                          if '"permission":"external_directory"' in error.replace(" ", "") else

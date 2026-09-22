@@ -28,7 +28,9 @@ export function markdown(text,documents=[]){
   const explicit=[...String(text||'').matchAll(/【D([a-f0-9]{12}):B/g)].map(m=>m[1]);
   const allowBare=documents.length===1&&explicit.every(id=>id===documents[0].id);
   function inline(s){
-    return citations(esc(s).replace(/`([^`]+)`/g,'<code>$1</code>').replace(/\*\*([^*]+)\*\*/g,'<strong>$1</strong>'),documents,allowBare);
+    // Only authenticated, immutable DOCX download routes from current materials.
+    const escaped=esc(s).replace(/\[([^\]\n]+)\]\((\/api\/redline\/([a-f0-9]{12})\/file\?thread_id=[a-f0-9]{24}&amp;version_id=[a-f0-9]{24})\)/g,(full,label,url,id)=>documents.some(d=>d.id===id)?`<a href="${url}" download>${label}</a>`:full);
+    return citations(escaped.replace(/`([^`]+)`/g,'<code>$1</code>').replace(/\*\*([^*]+)\*\*/g,'<strong>$1</strong>'),documents,allowBare);
   }
   let html='',table=[],code=null;
   function flush(){if(table.length){

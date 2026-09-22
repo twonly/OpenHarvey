@@ -29,7 +29,7 @@ def main():
     # Runtime-to-Web calls must not use an inherited network proxy.
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
     try:
-        with opener.open(req, timeout=60) as response:
+        with opener.open(req, timeout=180) as response:
             print(response.read().decode())
     except urllib.error.HTTPError as exc:
         data = json.loads(exc.read())

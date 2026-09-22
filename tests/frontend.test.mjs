@@ -286,7 +286,7 @@ test('intentional conversation switch closes SSE without a reconnect warning',t=
 
 test('explicit skill stays visible in the user bubble without implying execution succeeded',()=>{
   const html=conversationHTML({messages:[{info:{role:'user'},parts:[{type:'text',text:'/contract-review\n全面审查下。'}]}],documents:[],status:{type:'idle'}});
-  assert.match(html,/class="message-skill"[^>]*>\/contract-review<\/span>/);
+  assert.match(html,/class="message-skill"[^>]*>风险审查<\/span>/);
   assert.match(html,/class="user-text">全面审查下。<\/div>/);
   assert.doesNotMatch(html,/完成|成功/);
 });
@@ -438,12 +438,6 @@ test('environment loader preserves status safely without time UI',async()=>{
  assert.ok(!html.includes('elapsed'));assert.ok(!loadingStateHTML('<script>').includes('<script>'));
 });
 
-test('skill insertion preserves entered instructions and replaces slash selection',async()=>{
- const {skillInput}=await import('../static/ui-utils.js');
- assert.equal(skillInput('重点看付款','contract-summary'),'/contract-summary 重点看付款');
- assert.equal(skillInput('/','contract-summary'),'/contract-summary ');
- assert.equal(skillInput('/contract-review 重点看付款','contract-summary'),'/contract-summary 重点看付款');
-});
 test('selected source has a separate escaped quote style before and after native delivery',async()=>{
  const {userMessageHTML}=await import('../static/ui-utils.js');
  const pending=userMessageHTML('解释这条',[],[{filename:'合同.txt',text:'付款<30天'}]);

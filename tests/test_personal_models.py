@@ -53,5 +53,43 @@ class PersonalModelsTests(fixtures.WorkbenchTests):
         models.migrate_personal()
         self.assertEqual(models.public(models.scope({'id':new_id})),[])
 
+    def test_protocol_parameters_persist_and_reach_native_config(self):
+        models=self.app.state.models;u=self.store.one('SELECT * FROM users WHERE id=?',(self.uid,))
+        extra={'thinking':{'type':'enabled','budget_tokens':2048},'max_tokens':8192,'temperature':0.4}
+        models.save(u,self.body(protocol='anthropic',base_url='https://api.anthropic.com',extra_body=extra))
+        public=models.public(models.scope(u))[0]
+        self.assertEqual(public['extra_body'],extra);self.assertEqual(public['protocol'],'anthropic')
+        native,_=models.native(models.snapshot(models.scope(u)))
+        provider=native['provider']['same-provider']
+        self.assertEqual(provider['npm'],'@ai-sdk/anthropic')
+        self.assertEqual(provider['options']['baseURL'],'https://api.anthropic.com/v1')
+        self.assertEqual(provider['options']['workbenchExtraBody'],extra)
+        models.save(u,self.body(revision=1,protocol='openai',extra_body={}))
+        provider=models.native(models.snapshot(models.scope(u)))[0]['provider']['same-provider']
+        self.assertEqual(provider['npm'],'@ai-sdk/openai-compatible')
+        self.assertNotIn('workbenchExtraBody',provider['options'])
+
+    def test_reject_invalid_protocol_and_request_parameters(self):
+        models=self.app.state.models
+        for change in [{'protocol':'invalid'},{'extra_body':[]},{'extra_body':None},{'extra_body':{'temperature':float('nan')}},{'extra_body':{'messages':[]}},{'extra_body':{'tools':[]}},{'extra_body':{'x':'x'*32001}}]:
+            with self.subTest(change=str(change)[:80]),self.assertRaises(ValueError):models.validate(self.body(**change))
+
+    def test_delete_is_private_revision_checked_and_last_snapshot_empty(self):
+        models=self.app.state.models;u=self.store.one('SELECT * FROM users WHERE id=?',(self.uid,))
+        models.save(u,self.body());self.login('bob')
+        with patch.object(self.app.state.manager,'operation',return_value={'operation_id':'stub'}):
+            self.assertEqual(self.client.delete('/api/providers/same-provider?revision=1',headers=self.headers).status_code,404)
+            self.login('alice')
+            self.assertEqual(self.client.delete('/api/providers/same-provider?revision=0',headers=self.headers).status_code,409)
+            response=self.client.delete('/api/providers/same-provider?revision=1',headers=self.headers)
+            self.assertEqual(response.status_code,200,response.text)
+            self.assertEqual(self.client.delete('/api/providers/trial?revision=1',headers=self.headers).status_code,403)
+        self.assertEqual(models.public(models.scope(u)),[])
+        self.assertEqual(models.snapshot(models.scope(u)),[])
+        self.assertEqual(models.allowed(models.scope(u)),set())
+        self.assertEqual(models.native(models.snapshot(models.scope(u)))[0]['enabled_providers'],[])
+        self.assertEqual(len(models.snapshot(models.scope(u),1)),1)
+
+
 for _name in list(vars(fixtures.WorkbenchTests)):
     if _name.startswith('test_') and _name not in vars(PersonalModelsTests):setattr(PersonalModelsTests,_name,None)

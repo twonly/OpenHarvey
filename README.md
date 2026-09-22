@@ -19,6 +19,17 @@ OpenHarvey connects source documents, conversations and saved deliverables. It i
 
 The website and workspace interface support Chinese and English. Existing documents, examples and generated reports retain their original language. English-contract quality requires separate evaluation.
 
+
+## What’s new: Memory and DOCX review
+
+- **Personal memory you control:** opt in under Labs, ask the agent to remember long-term preferences, or add, edit and delete them yourself. Current instructions take priority; contract facts remain grounded in current documents.
+- **Review with the agent in the contract:** select a clause, request an edit and save it as native pending tracked changes. Changes and comments link to their text; accepting a change and resolving a comment are separate decisions.
+- **Keep your place and your history:** linked heading navigation, autosave, grouped save history, named milestones and restore-as-new-version. Preserve the uploaded original and download revised or clean DOCX files.
+
+DOCX review is a **limited rollout for enabled accounts**, built with SuperDoc 1.46.3 on the AGPL route. Single-user editing only; PDFs remain available for reading, analysis and suggestions. Clean export requires resolving pending changes. Complex layout fidelity and complete Word/WPS accept/reject compatibility are still under evaluation.
+
+[Feature details](https://openharvey.com/en/features#latest) · [Setup and boundaries](docs/memory-and-review.md)
+
 ## Five product highlights
 
 **See the evidence. Deliver the work.** [Explore the product with full-size screenshots](https://openharvey.com/en/features). The screenshots below show the Chinese workspace; account identifiers are masked in the supplied images.
@@ -70,6 +81,8 @@ git clone https://github.com/twonly/OpenHarvey.git
 cd OpenHarvey
 python3.12 -m venv .venv
 .venv/bin/python -m pip install -r requirements.txt
+npm ci
+npm run build:redline
 npm install -g opencode-ai@1.16.2
 export CW_DATA_DIR="$(mktemp -d /tmp/openharvey-data.XXXXXX)"
 export CW_SANDBOX_BACKEND=local

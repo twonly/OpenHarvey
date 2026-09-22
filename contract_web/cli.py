@@ -15,6 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 def runtime_config(shared):
     return {"$schema": "https://opencode.ai/config.json", "default_agent": "contract",
             "share": "disabled", "autoupdate": False, "snapshot": False,
+            "plugin": [(shared / "plugins/request-params.js").as_uri(), (shared / "plugins/memory.js").as_uri()],
             "compaction": {"auto": True, "prune": False},
             "skills": {"paths": [str(shared / "skills")]},
             "agent": {"contract": {"mode": "primary", "description": "合同工作台助手",

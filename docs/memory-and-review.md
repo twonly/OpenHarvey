@@ -1,0 +1,13 @@
+# Memory and DOCX review
+
+Personal memory is opt-in under `/labs`. It stores account-scoped working preferences, with add/edit/delete controls and agent-requested writes. Current user instructions take priority. Memory is not contract evidence, a vector database, or a separate agent; enabled memories are included in task context. Existing conversations are not rewritten when memory is disabled or deleted.
+
+DOCX review uses SuperDoc **1.46.3** (AGPL). Install with `npm ci` and build with `npm run build:redline`. Set `CW_REDLINE_USERS` to a comma-separated list of enabled usernames; an empty list disables review, and `*` enables non-demo accounts. Hosted availability follows its operator's rollout list. Do not upgrade SuperDoc across major versions without reviewing licensing and compatibility.
+
+The browser editor and server engine share the locked dependency. The supplied Dockerfile builds the browser bundle and retains the server engine dependencies. Use one application worker and one replica with persistent SQLite and file storage. Back up the database, document versions and encryption keys together. Generated bundles retain third-party license notices; source and lockfile are provided here.
+
+Select a clause and instruct the agent to edit; explicit edits are saved as native pending tracked changes. Inspect reasons and linked text, accept or reject changes individually or in groups, and manage comments independently. The linked outline uses current Word heading structure; documents without recognized headings show an empty-state message. Autosaves preserve recoverable history while continuous saves are grouped in the interface. Naming a milestone does not modify the document; restoring history creates a new current version.
+
+The uploaded original is retained. Revised DOCX exports preserve pending changes and comments. Clean export is blocked until all pending changes are resolved, then removes comments on an export copy. PDFs support reading, analysis and suggested wording, not native Word tracked changes.
+
+Limits: single-user editing with a write lease; no real-time collaborative editing. Cross-paragraph merge/split tracked edits are rejected. Unsupported structures or detected integrity loss must fail explicitly. Complex layout fidelity and full Word/WPS accept/reject compatibility still require evaluation. This feature does not guarantee preservation of every possible DOCX structure.

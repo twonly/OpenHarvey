@@ -1,0 +1,1 @@
+{"private":true,"type":"module","scripts":{"build":"esbuild index.js --bundle --format=esm --platform=node --target=node20 --minify --legal-comments=eof --outfile=../../runtime/plugins/memory.js"},"dependencies":{"@opencode-ai/plugin":"1.16.2"},"devDependencies":{"esbuild":"0.25.10"}}

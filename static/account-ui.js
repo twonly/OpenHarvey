@@ -50,13 +50,23 @@ export async function accountReady(me,{tour=true}={}){
  if(me.capabilities?.ops&&nav){const entry=document.createElement('a');entry.id='opsEntry';entry.href='/ops';entry.textContent=tr('运营看板');nav.append(entry);}
  let bar=document.getElementById('accountUsage');
  if(usageRender)document.removeEventListener('usage-changed',usageRender);
- if(me.role!=='admin'){
+ usageRender=null;usageObserver?.disconnect();
+ if(me.role!=='admin'&&!me.trial_notice_dismissed){
   if(!bar){bar=document.createElement('div');bar.id='accountUsage';bar.className='account-usage';document.body.prepend(bar);}
-  if(!bar.querySelector('.usage-info'))bar.innerHTML='<div class="usage-info"></div>';
+  bar.innerHTML=ui`<div class="usage-info"></div><button type="button" class="usage-dismiss" aria-label="关闭试用提示，不再显示" title="关闭试用提示，不再显示">×</button><span class="usage-error" role="status"></span>`;
+  bar.querySelector('.usage-dismiss').onclick=async e=>{
+   const button=e.currentTarget;button.disabled=true;
+   try{
+    await api('/api/settings/trial-notice/dismiss',{method:'POST',body:{}});
+    me.trial_notice_dismissed=true;usageObserver?.disconnect();
+    if(usageRender)document.removeEventListener('usage-changed',usageRender);
+    usageRender=null;bar.remove();document.body.style.setProperty('--usage-h','0px');
+   }catch(error){button.disabled=false;bar.querySelector('.usage-error').textContent=error.message;}
+  };
   usageObserver?.disconnect();usageObserver=new ResizeObserver(()=>document.body.style.setProperty('--usage-h',bar.getBoundingClientRect().height+'px'));usageObserver.observe(bar);
   usageRender=async()=>{try{const usage=await api('/api/usage');bar.querySelector('.usage-info').innerHTML=ui`<span class="usage-dot" aria-hidden="true"></span><span>${me.account_kind==='demo'?tr('免登录试用'):tr('平台试用')} · 剩余 <b>${usage.remaining}</b> 次</span>${me.account_kind==='demo'?tr('<span class="usage-resource">新建对话 ')+usage.threads_remaining+tr(' · 上传 ')+usage.uploads_remaining+'</span>':''}${usage.expires_at?tr('<span class="usage-expiry">保留至 ')+esc(new Date(usage.expires_at*1000).toLocaleString(getLanguage()))+'</span>':''}<a href="${me.account_kind==='demo'?registerURL:'/model'}">${me.account_kind==='demo'?tr('注册并保留资料 →'):tr('使用自己的模型 →')}</a>`;}catch{}};
   document.addEventListener('usage-changed',usageRender);await usageRender();
- }else{bar?.remove();document.body.style.setProperty('--usage-h','0px');}
+ }else{bar?.remove();bar=null;document.body.style.setProperty('--usage-h','0px');}
  document.getElementById('registerButton')?.remove();
  if(me.account_kind==='demo'&&nav){const register=document.createElement('a');register.id='registerButton';register.className='register-button';register.href=registerURL;register.textContent=tr('免费注册');nav.append(register);}
  document.getElementById('startTour')?.remove();

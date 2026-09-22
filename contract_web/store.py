@@ -96,7 +96,7 @@ class Store:
             if "model" not in columns:
                 db.execute("ALTER TABLE threads ADD COLUMN model TEXT")
 
-            for column in ('custom_title','seen_completion'):
+            for column in ('custom_title','seen_completion','dismissed_todos'):
                 if column not in {r[1] for r in db.execute('PRAGMA table_info(threads)')}:
                     db.execute(f'ALTER TABLE threads ADD COLUMN {column} TEXT')
                     if column=='seen_completion' and db.execute("SELECT 1 FROM sqlite_master WHERE name='queued_messages'").fetchone():

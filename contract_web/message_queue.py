@@ -49,6 +49,17 @@ class MessageQueue:
     def pause(self, tid, reason):
         self.store.execute('INSERT INTO queue_state VALUES(?,1,?) ON CONFLICT(thread_id) DO UPDATE SET paused=1,reason=excluded.reason', (tid,reason))
 
+    def activities(self, wid):
+        """One lightweight query, without loading queued prompts or history."""
+        rows = self.store.all('''SELECT summary.*,q.id,q.status FROM (
+            SELECT q.thread_id,MAX(q.seq) AS seq,
+              MAX(q.status IN ('dispatching','submitted')) AS active,
+              MAX(q.status IN ('queued','failed')) AS pending
+            FROM queued_messages q JOIN threads t ON t.id=q.thread_id
+            WHERE t.workspace_id=? AND t.deleted_at IS NULL GROUP BY q.thread_id
+        ) summary JOIN queued_messages q ON q.seq=summary.seq''', (wid,))
+        return {row['thread_id']: row for row in rows}
+
     def enqueue(self, u, tid, body):
         request_id = body.pop('request_id', None) or secrets.token_hex(16)
         if not isinstance(request_id,str) or not 1 <= len(request_id) <= 100:

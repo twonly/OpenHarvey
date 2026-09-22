@@ -4,6 +4,7 @@ import shutil
 import time
 
 from fastapi import HTTPException, Request
+from starlette.concurrency import run_in_threadpool
 
 
 def register_workspace_management(app, store, settings, user, workspace, runtime, manager, queue, traces):
@@ -36,7 +37,7 @@ def register_workspace_management(app, store, settings, user, workspace, runtime
                 rt = runtime(u,wid=current["id"])
                 for item in threads:
                     await rt.call("DELETE", f'/session/{item["session_id"]}', tid=item["id"], allow_not_found=True)
-            documents = store.all("SELECT id FROM documents WHERE workspace_id=?", (current["id"],))
+            documents = store.all("SELECT id,suffix FROM documents WHERE workspace_id=?", (current["id"],))
             artifacts = store.all("SELECT id FROM artifacts WHERE workspace_id=?", (current["id"],))
             root = store.user_root(u["id"])
             for folder, rows in (("sources", documents), ("threads", threads), ("published", artifacts)):
@@ -44,13 +45,15 @@ def register_workspace_management(app, store, settings, user, workspace, runtime
                     path = root / folder / item["id"]
                     if path.exists():
                         shutil.rmtree(path)
+                    if folder == 'sources':
+                        await run_in_threadpool(app.state.pdf_cache.remove, path / ('source' + item['suffix']))
             tids = [item["id"] for item in threads]
             aids = [item["id"] for item in artifacts]
             with store.connect() as db:
                 db.execute("BEGIN IMMEDIATE")
                 for table, column, values in (
                     ("risk_feedback", "artifact_id", aids), ("trace_runs", "thread_id", tids),
-                    ("execution_configs", "thread_id", tids), ("queued_messages", "thread_id", tids),
+                    ("memory_receipts", "thread_id", tids), ("execution_configs", "thread_id", tids), ("queued_messages", "thread_id", tids),
                     ("queue_state", "thread_id", tids)):
                     if values:
                         marks = ",".join("?" for _ in values)

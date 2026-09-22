@@ -3,7 +3,9 @@ import {pendingRequest,preparationLabel,loadingStateHTML} from './message-queue.
 import {esc,markdown,citations} from './markdown.js';
 import {visibleMessageIssue,isCompaction,isCompactionContinuation} from './events.js';
 import {riskBoard} from './risk-ui.js';
+import {memoryReferencesHTML} from './memory-ui.js';
 import {toolHTML,thinkingHTML} from './agent-ui.js?v=20260913-2';
+import {skillLabel,skillCommand,skillMessage} from './skill-labels.js';
 
 export function welcomeHTML(documents=[]){
   const contract=documents.find(d=>!d.thread_id);
@@ -15,17 +17,13 @@ export function matchingSkills(input,skills=[]){
   const match=input.match(/^\/([^\s]*)$/);
   return match?skills.filter(s=>`${s.name} ${s.label} ${s.description||''}`.toLowerCase().includes(match[1].toLowerCase())):null;
 }
-export function skillInput(input,name){
-  const rest=input.replace(/^\/[^\s]*(?:[ \t]+|\n)?/,'');
-  return '/'+name+' '+rest;
-}
 function quoteHTML(text,filename,documents){
   return ui`<blockquote class="message-source-quote"><div class="message-quote-source">引用原文 · ${esc(filename||tr('合同原文'))}</div><div class="message-quote-text">${citations(esc(text),documents)}</div></blockquote>`;
 }
-export function userMessageHTML(text,documents=[],quotes=[]){
-  const selected=String(text).match(/^\/([a-z0-9]+(?:-[a-z0-9]+)*)(?:[ \t]*\n|[ \t]+|$)/);
-  const badge=selected?ui`<span class="message-skill" title="本条消息指定的 Skill">/${esc(selected[1])}</span>`:'';
-  const body=selected?text.slice(selected[0].length):text;
+export function userMessageHTML(text,documents=[],quotes=[],skills=[],explicitSkill=null){
+  const name=explicitSkill||skillCommand(text)?.[1];
+  const badge=name?ui`<span class="message-skill" title="本条消息指定的 Skill">${esc(skillLabel(name,skills))}</span>`:'';
+  const body=skillMessage(text,name,skills);
   // Presentation only: native history retains the original validated quote text.
   const sections=body.split(/\n\n选中原文（([^\n]+)）：\n/);
   let html=badge+`<div class="user-text">${citations(esc(sections[0]),documents)}</div>`;
@@ -49,11 +47,12 @@ export function conversationHTML(state,open=new Set()){
     let content='';
     for(const p of m.parts||[]){
       if(isCompactionContinuation(p))continue;
-      if(p.type==='text'&&p.text)content+=m.info.role==='user'?userMessageHTML(p.text,state.documents):`<div class="markdown">${markdown(p.text,state.documents)}</div>`;
+      if(p.type==='text'&&p.text)content+=m.info.role==='user'?userMessageHTML(p.text,state.documents,[],state.skills):`<div class="markdown" data-text-part="${esc(p.id)}">${markdown(p.text,state.documents)}</div>`;
       if(p.type==='tool'){
         content+=toolHTML(p,state.status.type==='idle'||index<currentTurn,open);
       }
     }
+    if(m.info.role==='assistant')content+=memoryReferencesHTML(m.parts||[],open,m.info.id);
     const issue=visibleMessageIssue(state,index);
     if(issue)content+=`<p class="chat-error">${esc(issue)}</p>`;
     else if(index===state.messages.length-1&&m.info.role==='assistant'&&!m.info.time?.completed&&state.status.type==='idle')content+=tr('<p class="muted">这段回复尚未完成。可发送消息继续。</p>');
@@ -65,7 +64,7 @@ export function conversationHTML(state,open=new Set()){
   const pending=pendingRequest(state);
   if(pending){
     const label=pending.status==='sending'?tr('正在发送'):pending.status==='failed'?tr('发送未确认，内容已保留'):pending.status==='dispatching'?preparationLabel(pending):pending.status==='submitted'?tr('已提交，等待响应'):tr('已收到，等待执行');
-    groups.push({role:'user',content:userMessageHTML(pending.body.text,state.documents,pending.body.quotes||[])+`<small class="muted">${pending.status==='dispatching'?loadingStateHTML(label):esc(label)}</small>`});
+    groups.push({role:'user',content:userMessageHTML(pending.body.text,state.documents,pending.body.quotes||[],state.skills,pending.body.skill)+`<small class="muted">${pending.status==='dispatching'?loadingStateHTML(label):esc(label)}</small>`});
   }
   return groups.map(g=>`<article class="chat-message ${g.role}"><div class="byline">${g.role==='user'?tr('你'):g.role==='process'?tr('执行记录'):tr('合同助手')}</div>${g.content}</article>`).join('')+thinkingHTML(state);
 }

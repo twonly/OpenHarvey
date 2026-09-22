@@ -1,4 +1,5 @@
 import asyncio
+import base64
 import logging
 from .session_policy import session_seconds
 from contextlib import asynccontextmanager
@@ -21,7 +22,7 @@ from starlette.concurrency import run_in_threadpool
 
 from .documents import (MAX_UPLOAD, SUFFIXES, prepare, active_rules, read_blocks, validate_result)
 from .export import _md_to_docx_bytes
-from .pdf_preview import render_pdf_page
+from .pdf_cache import PdfPageCache
 from .outline_jobs import OutlineJobs
 from .runtime import Runtime, RuntimeError, visible_event, visible_messages
 from .store import Store, digest
@@ -65,10 +66,13 @@ def create_app(data_dir=None, runtime_factory=Runtime, library=None):
     store = Store(data_dir or os.environ.get("CW_DATA_DIR", ROOT / "data"))
     app.state.store = store
     app.state.outlines = outlines = OutlineJobs()
+    app.state.pdf_cache = pdf_cache = PdfPageCache(store.root / 'pdf-previews')
     library = Path(library or ROOT / "runtime/library")
     locks = {}
     settings = Settings(store, ROOT / "runtime/skills")
     app.state.settings = settings
+    from .memory import Memory, register_memory
+    app.state.memory = memory = Memory(store)
     risks = RiskSettings(settings, library)
     app.state.risks = risks
     from .accounts import Accounts
@@ -82,6 +86,7 @@ def create_app(data_dir=None, runtime_factory=Runtime, library=None):
     e2b = E2B(store, settings, models, manager)
     app.state.e2b = e2b
     manager.e2b = e2b
+    e2b.memory = memory
     if runtime_factory is not Runtime: e2b.enabled = False
 
     @app.exception_handler(RuntimeError)
@@ -196,7 +201,8 @@ def create_app(data_dir=None, runtime_factory=Runtime, library=None):
             for item in json.loads(manifest.read_text()):
                 aliases[rt.directory(t["id"])+"/.skill-versions/"+item["hash"]+"/"+item["name"]] = labels.label('Skill 参考资料')
         aliases.update({rt.directory(t["id"]): labels.label('本次对话'), rt.config["skill_root"]: labels.label('公司资料')})
-        return PublicView(aliases, locale=locale)
+        skill_labels = {s['name']:s['content']['label'] for s in settings.items(u, 'skill')}
+        return PublicView(aliases, locale=locale, memory=memory.projector(u, t), skills=skill_labels)
 
     def context_file(u, t, rt, risk=None, execution=None):
         docs = documents_for(u, t)
@@ -218,6 +224,12 @@ def create_app(data_dir=None, runtime_factory=Runtime, library=None):
                    "revision_format": rt.config["skill_root"] + "/templates/revision.md",
                    "artifact_format": rt.config["skill_root"] + "/templates/artifacts.md",
                    "save_url": rt.config.get("save_url", "http://web:8080/internal/artifacts")}
+        if redline.enabled(u):
+            context['redline'] = {'enabled': True, 'transport': 'publish_script',
+                'request_kind': 'redline', 'capabilities': dict(redline.capabilities),
+                'workflow': '读取当前工作副本，apply 后根据回执 diff 和 download_url 交付；不默认追加 inspect/diff/export。request_id 自动生成，不调用 uuidgen 或脚本生成。跨段落合并与拆分暂不支持原生修订。', 'guide': rt.config['skill_root']+'/templates/redline.md',
+                'documents': [{'id': d['id'], 'version_id': (store.one('SELECT version_id FROM redline_documents WHERE document_id=?', (d['id'],)) or {}).get('version_id')}
+                              for d in docs if d['suffix']=='.docx' and (d['thread_id'] is None or d['thread_id']==t['id'])]}
         for name,value in (("context.json",context),("risk-library.json",rules)):
             p=wd/name;data=json.dumps(value,ensure_ascii=False,indent=2)
             if not p.exists() or p.read_text()!=data:p.write_text(data)
@@ -226,6 +238,10 @@ def create_app(data_dir=None, runtime_factory=Runtime, library=None):
     from .artifact_service import ArtifactService
     artifacts_service = ArtifactService(store, risks, documents_for, source_dir)
     app.state.artifacts_service = artifacts_service
+    from .redline import Redline, register_redline
+    app.state.redline = redline = Redline(store)
+    register_redline(app, redline, user, thread)
+    artifacts_service.redline = redline
     e2b.artifacts = artifacts_service
 
     async def create_thread(u, w):
@@ -322,8 +338,9 @@ def create_app(data_dir=None, runtime_factory=Runtime, library=None):
         u = user(request)
         return {**accounts.public(u),
                 "ui_language": settings.preferences(u)['values'].get('ui_language'),
+                "trial_notice_dismissed": settings.preferences(u)['effective']['trial_notice_dismissed'],
                 "runtime": manager.instance(u["id"]),
-                "capabilities": {"admin": u["role"] == "admin", "ops": is_ops_owner(u), "skills": True, "settings": True,
+                "capabilities": {"redline": redline.enabled(u), "admin": u["role"] == "admin", "ops": is_ops_owner(u), "skills": True, "settings": True,
                                  "feishu": os.environ.get('CW_FEISHU_ENABLED') == '1' and u.get('account_kind') != 'demo'}}
 
     from .auth_api import register_auth
@@ -331,6 +348,7 @@ def create_app(data_dir=None, runtime_factory=Runtime, library=None):
     from .trial_proxy import register_trial_proxy
     register_trial_proxy(app,accounts)
     register_settings(app, settings, user, runtime)
+    register_memory(app, memory, user)
     from .feishu import register_feishu
     feishu = register_feishu(app, store, models, user)
     register_risk_settings(app, risks, user)
@@ -435,6 +453,7 @@ def create_app(data_dir=None, runtime_factory=Runtime, library=None):
             store.execute("DELETE FROM documents WHERE id=?", (docid,))
             context_file(u, t, rt)
             shutil.rmtree(source_dir(u, docid))
+            await run_in_threadpool(pdf_cache.remove, source_dir(u, docid) / ('source' + d['suffix']))
             if rt.config.get('e2b') and t['workspace_id'] in e2b.handles:
                 await e2b.sync_files(u,t)
             store.execute("UPDATE workspaces SET last_activity_at=? WHERE id=?", (time.time(), t["workspace_id"]))
@@ -463,6 +482,25 @@ def create_app(data_dir=None, runtime_factory=Runtime, library=None):
         d = document(u, docid, thread_id)
         return FileResponse(source_dir(u, docid) / ("source"+d["suffix"]), filename=d["filename"])
 
+    @app.get("/api/documents/{docid}/pages")
+    async def pdf_pages(docid: str, request: Request, thread_id: str | None = None,
+                        start: int = Query(default=1, ge=1), count: int = Query(default=3, ge=1, le=3),
+                        width: int = Query(default=960, ge=320, le=2880)):
+        u = user(request)
+        d = document(u, docid, thread_id)
+        if d['suffix'] != '.pdf':
+            raise HTTPException(404, '不是 PDF 文件')
+        def render():
+            pages = pdf_cache.get(source_dir(u, docid) / 'source.pdf', d['source_hash'], range(start, start + count), width)
+            return JSONResponse({'width': width, 'pages': [
+                {'page': page, 'png': base64.b64encode(data).decode('ascii')} for page, data in pages.items()]})
+        try:
+            return await run_in_threadpool(render)
+        except (IndexError, FileNotFoundError):
+            raise HTTPException(404, '页码或原件不存在') from None
+        except ValueError as error:
+            raise HTTPException(422, str(error)) from None
+
     @app.get("/api/documents/{docid}/pages/{page}")
     async def pdf_page(docid: str, page: int, request: Request, thread_id: str | None = None, width: int = Query(default=960, ge=320, le=2880)):
         u = user(request)
@@ -470,12 +508,12 @@ def create_app(data_dir=None, runtime_factory=Runtime, library=None):
         if d["suffix"] != ".pdf":
             raise HTTPException(404, "不是 PDF 文件")
         try:
-            content = await run_in_threadpool(render_pdf_page, source_dir(u, docid) / "source.pdf", page, width)
-        except IndexError:
+            pages = await run_in_threadpool(pdf_cache.get, source_dir(u, docid) / "source.pdf", d['source_hash'], [page], width)
+        except (IndexError, FileNotFoundError):
             raise HTTPException(404, "页码不存在") from None
         except ValueError as error:
             raise HTTPException(422, str(error)) from None
-        return Response(content, media_type="image/png")
+        return Response(pages[page], media_type="image/png")
 
     @app.get('/api/workspaces/{wid}/sandbox')
     async def sandbox_info(wid: str, request: Request):
@@ -492,22 +530,31 @@ def create_app(data_dir=None, runtime_factory=Runtime, library=None):
             await (e2b.pause(u,w) if action=='pause' else e2b.destroy(u,w))
         return e2b.diagnostics(wid)
 
-    async def thread_activity(u,t,snapshot_data=None):
-        rt=runtime(u,t['id']);pending=queue.state(t['id'])
+    async def thread_activity(u,t,snapshot_data=None,queue_data=None,cached_snapshot=None):
+        rt=None if cached_snapshot is not None else runtime(u,t['id'])
+        pending=queue.state(t['id']) if queue_data is None else {'active':queue_data.get('active'), 'items':queue_data.get('pending')}
         if snapshot_data is None:
-            status=await rt.status(t)
-            questions,permissions=await asyncio.gather(rt.call('GET','/question',tid=t['id']),rt.call('GET','/permission',tid=t['id']))
+            if cached_snapshot is None:
+                status=await rt.status(t)
+                questions,permissions=await asyncio.gather(rt.call('GET','/question',tid=t['id']),rt.call('GET','/permission',tid=t['id']))
+            else:
+                status=cached_snapshot.get('status',{'type':'idle'})
+                questions,permissions=cached_snapshot.get('questions',[]),cached_snapshot.get('permissions',[])
         else:
             messages,status,questions,permissions=snapshot_data
         if any(q.get('sessionID')==t['session_id'] for q in questions+permissions):
             return {'id':t['id'],'activity':'waiting','completion_id':None}
         if pending['active'] or status.get('type')!='idle':
             return {'id':t['id'],'activity':'waiting' if status.get('type')=='retry' else 'running','completion_id':None}
-        latest=store.one('SELECT id,status FROM queued_messages WHERE thread_id=? ORDER BY seq DESC LIMIT 1',(t['id'],))
+        latest=store.one('SELECT id,status FROM queued_messages WHERE thread_id=? ORDER BY seq DESC LIMIT 1',(t['id'],)) if queue_data is None else queue_data
         activity='idle';token=None
         if latest and latest['status']=='completed':
-            if snapshot_data is None:messages=await rt.messages(t)
-            info=next((m['info'] for m in reversed(messages) if m['info']['role']=='assistant'),{})
+            if snapshot_data is not None:
+                info=next((m['info'] for m in reversed(messages) if m['info']['role']=='assistant'),{})
+            elif cached_snapshot is not None and 'last_assistant' in cached_snapshot:
+                info=cached_snapshot['last_assistant']
+            else:
+                info=await (rt or runtime(u,t['id'])).last_assistant(t)
             if info.get('error') or info.get('finish') in {'length','content-filter','content_filter'}:activity='failed'
             elif info.get('time',{}).get('completed'):
                 token=latest['id'];activity='completed' if t.get('seen_completion')!=token else 'idle'
@@ -517,9 +564,12 @@ def create_app(data_dir=None, runtime_factory=Runtime, library=None):
 
     @app.get('/api/workspaces/{wid}/thread-status')
     async def thread_status(wid: str,request: Request):
-        u=user(request);workspace(u,wid)
+        u=user(request);w=workspace(u,wid)
         ts=store.all('SELECT * FROM threads WHERE workspace_id=? AND deleted_at IS NULL',(wid,))
-        return await asyncio.gather(*(thread_activity(u,t) for t in ts))
+        queues=queue.activities(wid)
+        snapshots=await run_in_threadpool(e2b.activity_snapshots,ts) if w['backend']=='e2b' else None
+        return await asyncio.gather(*(thread_activity(u,t,queue_data=queues.get(t['id'],{}),
+            cached_snapshot=snapshots.get(t['id'],{}) if snapshots is not None else None) for t in ts))
 
     @app.post('/api/threads/{tid}/seen')
     async def thread_seen(tid: str,request: Request):
@@ -554,10 +604,20 @@ def create_app(data_dir=None, runtime_factory=Runtime, library=None):
                 if (d['id'],s['id']) in cited or (len(documents)==1 and ('',s['id']) in cited):
                     d['locations'][s['id']]['preview']=s.get('text','')[:180]
         return {"id": tid, "session_id": t["session_id"], "title": view.text(title), "archived_at": t["archived_at"], "deleted_at": t["deleted_at"],
-                "messages": visible_messages(messages, view), "status": view.clean(status), "todos": view.clean(todos),
+                "messages": visible_messages(messages, view), "status": view.clean(status), "todos": view.clean(todos), "dismissed_todos": t.get('dismissed_todos'),
                 "questions": [view.request(q) for q in questions if q.get("sessionID") == t["session_id"]],
                 "permissions": [view.request(q) for q in permissions if q.get("sessionID") == t["session_id"]],
                 "queue": queue.state(tid), "completion_id": (await thread_activity(u,t,(messages,status,questions,permissions)))["completion_id"], "documents": documents, "skills": skills, "full_execution_available": bool(rt.config.get('e2b')), "permission_mode": (settings.preferences(u)["effective"]["permission_mode"] if status["type"] == "idle" and not t["permission_override"] else t["permission_mode"]), "permission_override": bool(t["permission_override"]), "risk_scheme": t.get("risk_scheme")}
+
+    @app.post('/api/threads/{tid}/tasks/dismiss')
+    async def dismiss_tasks(tid: str, request: Request):
+        u = user(request)
+        thread(u, tid, True)
+        value = (await request.json()).get('signature')
+        if not isinstance(value, str) or not 1 <= len(value) <= 50000:
+            raise HTTPException(422, '任务清单标识无效')
+        store.execute('UPDATE threads SET dismissed_todos=? WHERE id=?', (value, tid))
+        return {'dismissed_todos': value}
 
     @app.put("/api/threads/{tid}/permission-mode")
     async def permission_mode(tid: str, request: Request):
@@ -600,9 +660,12 @@ def create_app(data_dir=None, runtime_factory=Runtime, library=None):
         allowed = models.allowed(models.scope(u))
         if allowed is not None:
             catalog["models"] = [m for m in catalog["models"] if m["id"] in allowed]
-        ids = {m["id"] for m in catalog["models"]}
+        remaining = accounts.usage(u)['remaining']
+        ids = {m['id'] for m in catalog['models'] if remaining != 0 or not m['id'].startswith('trial/')}
         selection = (t.get("model") if t is not None else u.get("model")) or settings.preferences(u)["effective"]["model"] or catalog["default"]
-        return {**catalog, "selected": selection,
+        if selection not in ids:
+            selection = next((m['id'] for m in catalog['models'] if m['id'] in ids), None)
+        return {**catalog, "selected": selection, "trial_remaining": remaining,
                 "available": selection in ids}
 
     @app.get("/api/models")
@@ -616,7 +679,7 @@ def create_app(data_dir=None, runtime_factory=Runtime, library=None):
         u = user(request)
         selected = (await request.json()).get("model")
         catalog = await model_options(u)
-        if selected not in [m["id"] for m in catalog["models"]]:
+        if selected not in [m["id"] for m in catalog["models"]] or (catalog['trial_remaining'] == 0 and selected.startswith('trial/')):
             raise HTTPException(422, "该模型未配置或不可用，请重新选择")
         store.execute("UPDATE users SET model=? WHERE id=?", (selected, u["id"]))
         return {"selected": selected}
@@ -627,7 +690,7 @@ def create_app(data_dir=None, runtime_factory=Runtime, library=None):
         t = thread(u, tid, True)
         selected = (await request.json()).get("model")
         catalog = await model_options(u, t)
-        if selected not in [m["id"] for m in catalog["models"]]:
+        if selected not in [m["id"] for m in catalog["models"]] or (catalog['trial_remaining'] == 0 and selected.startswith('trial/')):
             raise HTTPException(422, "该模型未配置或不可用，请重新选择")
         store.execute("UPDATE threads SET model=? WHERE id=?", (selected, tid))
         return {"selected": selected}
@@ -693,7 +756,8 @@ def create_app(data_dir=None, runtime_factory=Runtime, library=None):
         from .thread_titles import prepare_title_model
         await prepare_title_model(store, u, t, rt, selected)
         skill = body.get("skill")
-        if skill and (not isinstance(skill, str) or skill not in {s["name"] for s in await rt.skills(tid)}):
+        skill_catalog = await rt.skills(tid) if skill else []
+        if skill and (not isinstance(skill, str) or skill not in {s["name"] for s in skill_catalog}):
             raise HTTPException(422, "当前运行时未发现这个 Skill，请刷新页面后重试")
         risk = risks.choose(u, body.get("risk_scheme") or t.get("risk_scheme"))
         docs = documents_for(u, t)
@@ -717,7 +781,8 @@ def create_app(data_dir=None, runtime_factory=Runtime, library=None):
             {"id": d["id"], "filename": d["filename"], "path": rt.source_path(d["id"]),
              "source_hash": d["source_hash"], "primary": d["thread_id"] is None} for d in docs], ensure_ascii=False)
         if skill:
-            system += f"本次用户明确选择 {skill}，请调用原生 skill 工具加载它并遵循用户补充要求。"
+            skill_label = next(s['label'] for s in skill_catalog if s['name'] == skill)
+            system += f"本次用户明确选择 Skill {json.dumps({'name':skill,'label':skill_label},ensure_ascii=False)}，请使用 name 调用原生 skill 工具并遵循用户补充要求。对用户只使用 label，不展示内部调用名称。"
             # Store the explicit choice in native history, so refresh and
             # another browser show the same user instruction without a chat DB.
             if not re.match(r"^/" + re.escape(skill) + r"(?:\s|$)", text):
@@ -728,6 +793,7 @@ def create_app(data_dir=None, runtime_factory=Runtime, library=None):
                                     skill_revision=applied_skills['revision'] if applied_skills else None,
                                     after_message_id=previous[-1]["info"]["id"] if previous else None,
                                     model_revision=(e2b.binding(t['workspace_id'])['revision'] if rt.config.get('e2b') else (manager.instance(u["id"]) or {}).get("applied_revision")))
+        system += memory.prepare(u, t, rt, execution, message_id)
         context_file(u, t, rt, risk=risk, execution=execution)
         if rt.config.get('e2b'):
             e2b.progress(t,'syncing')
@@ -780,8 +846,8 @@ def create_app(data_dir=None, runtime_factory=Runtime, library=None):
             raise HTTPException(422,'当前运行时未发现这个 Skill，请刷新后重试')
         # Freeze the user's explicit choices. Versions and access are revalidated
         # on dispatch; pending instructions never count as executed chat history.
-        catalog=await runtime(u).models()
-        selected=body.get('model') or t.get('model') or settings.preferences(u)['effective']['model'] or catalog['default']
+        catalog=await model_options(u,t)
+        selected=body.get('model') or catalog['selected']
         allowed=models.allowed(models.scope(u))
         if selected not in {m['id'] for m in catalog['models']} or (allowed is not None and selected not in allowed):
             raise HTTPException(422, "所选模型不可用，请重新选择")
@@ -863,18 +929,25 @@ def create_app(data_dir=None, runtime_factory=Runtime, library=None):
             text_parts = set()
             queue_stamp=None
             language_checked=0
+            access_checked=0
+            queue_checked=0
             view = public_view(u, t, rt)
             yield 'data: {"type":"workbench.connected"}\n\n'
             try:
                 async for event in rt.events(t):
-                    if await request.is_disconnected() or not store.authenticate(request.cookies.get(COOKIE, "")):
-                        break
-                    if rt.config.get('e2b'): t.update(thread(u,tid))
-                    current_queue=queue.state(tid)
-                    stamp=json.dumps(current_queue,sort_keys=True)
-                    if stamp!=queue_stamp:
-                        queue_stamp=stamp
-                        yield 'data: '+json.dumps({'type':'workbench.queue','properties':{'queue':current_queue}})+'\n\n'
+                    if await request.is_disconnected():break
+                    now=time.monotonic()
+                    if now-access_checked>=1:
+                        access_checked=now
+                        if not store.authenticate(request.cookies.get(COOKIE, "")):break
+                        if rt.config.get('e2b'):t.update(thread(u,tid))
+                    if now-queue_checked>=.25:
+                        queue_checked=now
+                        current_queue=queue.state(tid)
+                        stamp=json.dumps(current_queue,sort_keys=True)
+                        if stamp!=queue_stamp:
+                            queue_stamp=stamp
+                            yield 'data: '+json.dumps({'type':'workbench.queue','properties':{'queue':current_queue}})+'\n\n'
                     if time.monotonic()-language_checked > 1:
                         language_checked=time.monotonic()
                         locale = settings.preferences(u)['effective']['ui_language']
@@ -929,6 +1002,10 @@ def create_app(data_dir=None, runtime_factory=Runtime, library=None):
             raise HTTPException(410, "产出物文件缺失，请联系管理员恢复")
         body = json.loads((dest/"report.json").read_text())
         files = files_for(body)
+        if body.get('redline') and body.get('file_hash'):
+            binary=dest/'content.docx'
+            if not binary.is_file() or hashlib.sha256(binary.read_bytes()).hexdigest()!=body['file_hash']:
+                raise HTTPException(410,'修订文件缺失或校验失败，请重新发布')
         # Original saved reports remain readable without migrating user data.
         if files.get("md") and not (dest/files["md"]).exists():
             files["md"] = "report.md"
@@ -1049,6 +1126,7 @@ def create_app(data_dir=None, runtime_factory=Runtime, library=None):
     @app.get("/traces")
     @app.get("/model")
     @app.get("/connectors")
+    @app.get("/labs")
     @app.get("/skills")
     @app.get("/risks")
     @app.get("/members")

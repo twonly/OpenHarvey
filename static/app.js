@@ -1,25 +1,37 @@
+import {configureModelValue,modelOptionsHTML,modelUsable,availableModel} from './model-picker.js';
 import {accountLanguage} from './language-ui.js';
 import {t as tr,ui} from './i18n.js';
 import {getLanguage} from './i18n.js';
 import {loadingHTML,setLoadingStatus} from './loading-ui.js';
 import {prepareWordPreview,renderWord} from './word-preview.js?v=20260914-progressive-2';
-import {setupAuth,accountReady,signOut} from './account-ui.js?v=20260914-loading-all';
+import {setupAuth,accountReady,signOut} from './account-ui.js?v=20260921-tasks';
 import {accountIdentityHTML} from './account-identity.js';
 import {previewCitation} from './preview-citations.js';
 import {threadScope,scopeLabels,threadListHTML,threadTitle} from './thread-ui.js?v=20260912-21';
-import {queueHTML,restoreDraft,reconcilePending,pendingRequest,preparationLabel,loadingStateHTML} from './message-queue.js?v=20260912-21';
-import {setupSettings} from './settings-ui.js?v=20260914-progressive-1';
+import {queueHTML,restoreDraft,reconcilePending,pendingRequest,preparationLabel,loadingStateHTML} from './message-queue.js?v=20260921-skill-labels';
+import {setupSettings} from './settings-ui.js?v=20260921-skill-labels';
+import {handleMemoryAction,announceMemoryChange} from './memory-ui.js';
 import {settingsTab,savedWorkbenchURL} from './settings-routes.js';
 import {api,upload} from './api.js';
 import {connectEvents,applyEvent,runIssue,unchangedEvent} from './events.js?v=20260915-runtime-1';
-import {esc} from './markdown.js';
+import {esc,markdown} from './markdown.js';
+import {isCompaction} from './events.js';
 import {riskBoard} from './risk-ui.js';
-import {todosHTML,requestsHTML,orderedDocuments,icon,executionPhase} from './agent-ui.js?v=20260915-runtime-1';
-import {conversationHTML,artifactHTML,matchingSkills,welcomeHTML,skillInput} from './ui-utils.js?v=20260915-runtime-1';
-import {setupReading,setupArtifactStrip,setupQuotes,pdfMarkup,fitPdfText} from './reading.js?v=20260915-runtime-1';
+import {todosHTML,todoSignature,requestsHTML,orderedDocuments,icon,executionPhase} from './agent-ui.js?v=20260921-tasks';
+import {conversationHTML,artifactHTML,matchingSkills,welcomeHTML} from './ui-utils.js?v=20260921-skill-labels';
+import {skillLabel,skillCommand,withoutSkillCommand,skillPrompt,skillMessage} from './skill-labels.js';
+import {setupReading,setupArtifactStrip,setupQuotes,pdfMarkup,fitPdfText} from './reading.js?v=20260921-performance';
 import {setupDocumentNavigation} from './document-navigation.js?v=20260914-outline';
+import {RedlineEditor} from './redline.js';
+import {loadPdfPages} from './pdf-pages.js';
 
 const $=id=>document.getElementById(id);
+const redline=new RedlineEditor({
+  onQuote:selection=>{ $('input').value += '\n合同选区（工作版本 '+selection.version_id.slice(0,8)+'）：\n“'+selection.text+'”\n'+(selection.instruction||'请按以下要求修改：');$('input').focus();saveDraft(); },
+  onArtifact:()=>void refreshWorkspace().catch(e=>notice(e.message)),
+  onError:message=>notice(message,'error')
+});
+
 let identity=null;
 let workspace=null,tid=null,state={messages:[],status:{type:'idle'},documents:[]},selectedSkill=null;
 let stopStream=()=>{},epoch=0,renderTimer=null,source=null,sourceMode='original',artifactId=null;
@@ -30,6 +42,10 @@ let threadManaging=false,threadFilter='active',creatingThread=false,viewRequests
 let permissionSaving=false,permissionTarget=null,permissionSpinner=false,riskSchemeOptions=null;
 let sourceRendered=false,sending=false,submission=null,queuePolling=false,stoppingThread=null;
 let sourceRequest=null,artifactLoadingId=null;
+let stopPdfPages=()=>{};
+const streamingParts=new Map();
+const memoryReceiptIDs=new Set();
+let fullRender=true;
 const artifactData=new Map();
 const reading=setupReading();
 const artifactStrip=setupArtifactStrip();
@@ -37,8 +53,22 @@ const sourceNavigation=setupDocumentNavigation(navigateOutline,notice);
 const quotes=setupQuotes(()=>({source,tid}),()=>saveDraft(),notice,()=>reading.reset());
 new ResizeObserver(()=>fitPdfText($('sourceContent'))).observe($('sourceContent'));
 
-const settingsUI=setupSettings({notice,onClose:async()=>{
+let workbenchRevision=0;
+function workbenchVisible(){return !document.hidden&&!settingsUI.isOpen()&&!settingsTab(location.pathname);}
+async function resumeWorkbench(){
+  if(!workbenchVisible())return;
+  lastQueuePoll=0;
+  if(tid)await restore(epoch);
+  await Promise.all([refreshQueue(true),refreshThreadActivity(true)]);
+}
+
+document.addEventListener('visibilitychange',()=>{
+  workbenchRevision++;
+  if(workbenchVisible())background(resumeWorkbench());
+});
+const settingsUI=setupSettings({notice,onOpen:()=>{workbenchRevision++;},onClose:async()=>{
   if(!workspace){await loadList();const saved=new URL(savedWorkbenchURL(sessionStorage.getItem('workbench-location')),location.origin).hash.match(/^#([a-f0-9]+)(?:\/thread\/([a-f0-9]+))?$/);if(saved)await selectWorkspace(saved[1],saved[2]);else if(workspaces.length)await selectWorkspace(workspaces[0].id);else{location.assign('/spaces');return;}}
+  await resumeWorkbench();
   await Promise.all([loadModels(),loadRiskSchemes()]);
   if(tid&&!state.permission_override&&state.status?.type==='idle'){const preferences=await api('/api/settings');state.permission_mode=preferences.effective.permission_mode;updateControls();}
   if(tid&&state.status?.type==='idle'){
@@ -52,6 +82,8 @@ function notice(text='',kind='info',busy=false){clearTimeout(noticeTimer);$('not
 function protect(fn){return async(...args)=>{try{await fn(...args);}catch(e){if(e.name!=='AbortError')notice(e.message,'error');}};}
 function background(task,view=epoch){void task.catch(e=>{if(view===epoch&&e.name!=='AbortError')notice(e.message,'error');});}
 function loggedOut(){
+  stopPdfPages();
+  memoryReceiptIDs.clear();
   identity=null;riskSchemeOptions=null;artifactLoadingId=null;
   document.body.dataset.auth='logged-out';$('authLoading').hidden=true;
   artifactData.clear();
@@ -150,13 +182,16 @@ async function refreshWorkspace(){
   if(!artifactId&&!artifactLoadingId&&workspace.artifacts.length&&document.activeElement!==$('input'))background(openArtifact(workspace.artifacts[0].id,false,false),view);
 }
 
-let activityPolling=false;
-async function refreshThreadActivity(){
-  if(!workspace||activityPolling||document.hidden||switching||threadManaging)return;
-  activityPolling=true;const wid=workspace.id,view=epoch;
+let activityPolling=false,lastActivityPoll=0,activityWorkspace=null;
+async function refreshThreadActivity(force=false){
+  if(!workspace||activityPolling||!workbenchVisible()||switching||threadManaging)return;
+  const active=state.status?.type!=='idle'||state.queue?.active||state.queue?.items?.length||workspace.threads.some(t=>['running','waiting'].includes(t.activity));
+  if(!force&&activityWorkspace===workspace.id&&Date.now()-lastActivityPoll<(active?3000:15000))return;
+  lastActivityPoll=Date.now();activityWorkspace=workspace.id;
+  activityPolling=true;const wid=workspace.id,view=epoch,revision=workbenchRevision;
   try{
     const rows=await api(`/api/workspaces/${wid}/thread-status`);
-    if(view!==epoch||workspace?.id!==wid)return;
+    if(view!==epoch||workspace?.id!==wid||revision!==workbenchRevision||!workbenchVisible())return;
     for(const row of rows){const t=workspace.threads.find(t=>t.id===row.id);if(t)Object.assign(t,row);}
     if(!$('threadList').querySelector('details[open]')&&!$('renameThreadDialog').open)renderWorkspace();
     const current=rows.find(t=>t.id===tid);
@@ -170,15 +205,16 @@ async function refreshThreadActivity(){
 setInterval(refreshThreadActivity,3000);
 async function markThreadSeen(view){
   const token=state.completion_id,target=tid;
-  if(!token||document.hidden||view!==epoch)return;
+  if(!token||!workbenchVisible()||view!==epoch)return;
   await api(`/api/threads/${target}/seen`,{method:'POST',body:{completion_id:token}});
   if(view!==epoch)return;
   const current=workspace.threads.find(t=>t.id===target);if(current&&current.completion_id===token){current.activity='idle';renderWorkspace();}
 }
 
 async function selectWorkspace(wid,requestedTid){
+  await redline.close();
   saveDraft();stopStream();viewRequests.abort();viewRequests=new AbortController();const view=++epoch;notice();
-  tid=null;source=null;sourceEpoch++;artifactId=null;artifactLoadingId=null;artifactEpoch++;quotes.set([]);clearComparison();$('artifactTitle').textContent='';
+  stopPdfPages();tid=null;source=null;sourceEpoch++;artifactId=null;artifactLoadingId=null;artifactEpoch++;quotes.set([]);clearComparison();$('artifactTitle').textContent='';
   sourceNavigation.setDocument(null);
   $('sourceContent').innerHTML=loadingHTML(tr('正在读取合同…'));
   $('artBody').innerHTML=tr('<p class="placeholder">摘要、报告及其他文件保存后会出现在这里。</p>');
@@ -200,7 +236,8 @@ async function selectWorkspace(wid,requestedTid){
 
 function visibleThreads(){return (workspace?.threads||[]).filter(t=>threadScope(t)===threadFilter);}
 function clearThreadSelection(){
-  saveDraft();stopStream();epoch++;sourceEpoch++;artifactEpoch++;clearTimeout(renderTimer);
+  stopPdfPages();
+  saveDraft();stopStream();epoch++;sourceEpoch++;artifactEpoch++;clearTimeout(renderTimer);renderTimer=null;fullRender=true;streamingParts.clear();
   tid=null;source=null;switching=false;restoring=false;buffer=[];
   state={messages:[],documents:[],status:{type:'idle'}};
   quotes.set([]);sourceNavigation.setDocument(null);clearComparison();
@@ -252,6 +289,11 @@ async function manageThread(id,action){
 }
 $('threadScope').onchange=protect(e=>changeThreadScope(e.target.value));
 $('restoreCurrentThread').onclick=protect(()=>manageThread(tid,'restore'));
+
+document.addEventListener('click',e=>{if(e.target.closest('#messageHistory'))void handleMemoryAction(e,{notice});});
+document.addEventListener('memory-changed',()=>{if(tid)void restore().catch(e=>notice(e.message));});
+window.addEventListener('storage',e=>{if(e.key==='memory-change')document.dispatchEvent(new Event('memory-changed'));});
+
 document.addEventListener('click',e=>document.querySelectorAll('.thread-menu[open]').forEach(menu=>{if(!menu.contains(e.target))menu.open=false;}));
 document.addEventListener('keydown',e=>{if(e.key==='Escape'){const menu=document.querySelector('.thread-menu[open]');if(menu){menu.open=false;menu.querySelector('summary').focus();e.preventDefault();}}},true);
 
@@ -279,15 +321,16 @@ function renderArtifactPicker(){
 }
 
 async function selectThread(id){
+  if(id!==tid)await redline.close();
   if(id===tid&&!switching&&state.loaded)return;
-  saveDraft();stopStream();viewRequests.abort();viewRequests=new AbortController();clearTimeout(renderTimer);const view=++epoch;tid=id;sourceEpoch++;notice();
+  saveDraft();stopStream();viewRequests.abort();viewRequests=new AbortController();clearTimeout(renderTimer);renderTimer=null;fullRender=true;streamingParts.clear();const view=++epoch;tid=id;sourceEpoch++;notice();
   modelCatalog=null;selectedModel=null;$('modelSelect').replaceChildren();
   restoring=false;switching=true;buffer=[];requestSignature='';updateControls();
   state.queue=null;renderQueue();
   $('input').value=sessionStorage.getItem('draft:'+tid)||'';
   const savedSkill=sessionStorage.getItem('skill:'+tid)||null;
   let savedQuotes=[];try{savedQuotes=JSON.parse(sessionStorage.getItem('quotes:'+tid)||'[]');}catch{}
-  quotes.set(savedQuotes);setSkill(savedSkill);if(savedSkill&&!$('input').value.startsWith('/'))$('input').value=skillInput($('input').value,savedSkill);saveDraft();hideSkillPicker();
+  quotes.set(savedQuotes);setSkill(savedSkill);if(savedSkill)$('input').value=skillMessage($('input').value,savedSkill,skillCatalog);saveDraft();hideSkillPicker();
   const workbenchURL=`/agent#${workspace.id}/thread/${tid}`;sessionStorage.setItem('workbench-location',workbenchURL);
   if(!settingsUI.isOpen())history.replaceState(null,'',workbenchURL);
   renderWorkspace();
@@ -312,7 +355,7 @@ async function restore(view=epoch,refreshWorkspaceData=true){
   try{
     const fresh=await api(`/api/threads/${tid}`,{signal:viewRequests.signal});
     if(view!==epoch)return;
-    state={...fresh,loaded:true,pendingSend:state.pendingSend};reconcilePending(state);renderSkills(fresh.skills||[]);if(source&&!state.documents.some(d=>d.id===source.id)){source=null;sourceEpoch++;sourceNavigation.setDocument(null);$('sourceContent').replaceChildren();}
+    state={...fresh,loaded:true,pendingSend:state.pendingSend};reconcilePending(state);renderSkills(fresh.skills||[]);if(source&&!state.documents.some(d=>d.id===source.id)){stopPdfPages();source=null;sourceEpoch++;sourceNavigation.setDocument(null);$('sourceContent').replaceChildren();}
     state.error=null;
     // Snapshot already includes deltas; replay full updates only to avoid duplicate text.
     for(const event of buffer)if(event.type!=='message.part.delta')applyEvent(state,event);
@@ -333,7 +376,12 @@ async function restore(view=epoch,refreshWorkspaceData=true){
 
 function receive(event){
   if(unchangedEvent(state,event))return;
+  const p=event.properties?.part;
+  const m=p&&state.messages.find(m=>m.info.id===p.messageID);
+  const textOnly=!p?.memory_references&&!m?.parts.some(old=>old.id===p?.id&&old.memory_references)&&event.type==='message.part.updated'&&p.type==='text'&&m?.info.role==='assistant'&&!isCompaction(m.info)&&m.parts.some(old=>old.id===p.id&&old.text)&&!p.synthetic;
   applyEvent(state,event);reconcilePending(state);updateControls();
+  if(p?.memory_receipt?.saved&&!memoryReceiptIDs.has(p.memory_receipt.request_id)){memoryReceiptIDs.add(p.memory_receipt.request_id);queueMicrotask(announceMemoryChange);}
+  if(textOnly)streamingParts.set(p.id,p.text||'');else fullRender=true;
   if(event.type==='session.updated'){
     $('threadTitle').textContent=threadTitle(state.title);
     const item=workspace.threads.find(t=>t.id===tid);if(item)item.title=state.title;
@@ -341,12 +389,17 @@ function receive(event){
   }
   if(event.type==='workbench.queue')renderQueue();
   if(event.type.startsWith('question.')||event.type.startsWith('permission.'))renderRequests();
-  clearTimeout(renderTimer);renderTimer=setTimeout(renderMessages,50);
+  scheduleMessages();
   if(event.type.startsWith('question.')||event.type.startsWith('permission.')||
     (event.type==='session.status'&&event.properties.status.type==='idle')){
     restore().catch(e=>notice(e.message,'error'));
   }
   if(event.type==='session.error')notice(state.error,'error');
+}
+
+function scheduleMessages(){
+  // Schedule once per frame; incoming tokens never postpone an existing render.
+  if(renderTimer===null)renderTimer=setTimeout(()=>{renderTimer=null;renderMessages(true);},16);
 }
 
 function renderDocs(){
@@ -364,8 +417,19 @@ function renderDocs(){
   $('attachmentList').innerHTML=attachments.map(d=>ui`<div class="rail-attachment"><button data-open-attachment="${d.id}" title="${esc(d.filename)}">${icon('read')}<span><b>${esc(d.filename)}</b><small>${esc(d.suffix?.slice(1).toUpperCase()||tr('附件'))}</small></span></button><button data-delete-attachment="${d.id}" aria-label="删除附件 ${esc(d.filename)}" ${state.status.type!=='idle'||restoring?'disabled':''}>${icon('close')}</button></div>`).join('')||tr('<p class="rail-empty">暂无附件，可点击 ＋ 上传补充材料</p>');
 }
 
-function renderMessages(){
+function renderMessages(streaming=false){
+  clearTimeout(renderTimer);renderTimer=null;
   const host=$('messageHistory'),scroll=$('msgs'),atBottom=scroll.scrollHeight-scroll.scrollTop-scroll.clientHeight<100;
+  if(streaming&&!fullRender&&streamingParts.size){
+    const targets=[...streamingParts].map(([id,text])=>[host.querySelector(`[data-text-part="${CSS.escape(id)}"]`),text]);
+    if(targets.every(([node])=>node)){
+      for(const [node,text] of targets)node.innerHTML=markdown(text,state.documents);
+      streamingParts.clear();
+      if(atBottom)scroll.scrollTop=scroll.scrollHeight;
+      return;
+    }
+  }
+  streamingParts.clear();fullRender=false;
   const open=new Set([...host.querySelectorAll('details[open]')].map(d=>d.dataset.key));
   const html=conversationHTML(state,open)||welcomeHTML(state.documents);
   if(host.innerHTML!==html)host.innerHTML=html;
@@ -384,7 +448,9 @@ function renderRequests(){
 }
 
 async function loadSource(docid){
+  if(redline.documentId&&redline.documentId!==docid)await redline.close();
   if(sourceRequest?.id===docid&&sourceRequest.view===epoch)return sourceRequest.promise;
+  stopPdfPages();
   const view=epoch,load=++sourceEpoch;
   const request={id:docid,view},host=$('sourceContent');sourceRequest=request;
   source=null;sourceRendered=false;sourceNavigation.setDocument(null);quotes.hide();
@@ -411,6 +477,9 @@ async function loadSource(docid){
 
 async function renderSource(){
   if(!source)return;
+  $('viewRedline').hidden=!identity?.capabilities?.redline||!tid||!String(source.filename||'').toLowerCase().endsWith('.docx');
+  if(redline.documentId===source.id)return;
+  stopPdfPages();stopPdfPages=()=>{};
   const host=$('sourceContent'),doc=source,view=epoch,load=sourceEpoch,render=++sourceRenderEpoch;
   sourceRendered=false;
   sourceNavigation.loading();
@@ -423,6 +492,7 @@ async function renderSource(){
   }
   if(doc.kind==='pdf'){
     host.innerHTML=pdfMarkup(doc,tid);fitPdfText(host);
+    stopPdfPages=loadPdfPages(host,doc,tid);
   }else{
     host.innerHTML=loadingHTML(tr('正在渲染 Word 原件…'));
     try{
@@ -521,13 +591,14 @@ async function removeAttachment(id){
   await api(`/api/threads/${current}/attachments/${id}`,{method:'DELETE'});
   if(view!==epoch)return;
   quotes.removeDocument(id);
-  if(source?.id===id){source=null;sourceEpoch++;sourceNavigation.setDocument(null);$('sourceContent').replaceChildren();}
+  if(source?.id===id){stopPdfPages();source=null;sourceEpoch++;sourceNavigation.setDocument(null);$('sourceContent').replaceChildren();}
   await restore();notice(tr('附件已删除。历史对话中的既有内容仍保留，后续分析不再使用该附件。'));
 }
 function hideSkillPicker(){$('skillPicker').hidden=true;$('input').setAttribute('aria-expanded','false');$('input').removeAttribute('aria-activedescendant');}
 function renderSkills(catalog){
   skillCatalog=catalog;
-  $('skillActions').innerHTML=catalog.map(s=>`<button data-skill="${esc(s.name)}" title="${esc(s.description)}">${esc(s.label)}</button>`).join('');
+  state.skills=catalog;
+  $('skillActions').innerHTML=catalog.map(s=>`<button data-skill="${esc(s.name)}" title="${esc(s.description)}">${esc(skillLabel(s.name,skillCatalog))}</button>`).join('');
   setSkill(catalog.some(s=>s.name===selectedSkill)?selectedSkill:null);
   if(!$('skillPicker').hidden)renderSkillPicker();
 }
@@ -536,19 +607,21 @@ function renderSkillPicker(){
   if(!list)return hideSkillPicker();
   skillIndex=Math.min(skillIndex,Math.max(0,list.length-1));
   $('skillPicker').hidden=false;$('input').setAttribute('aria-expanded','true');
-  $('skillPicker').innerHTML=tr('<div class="picker-hint">SKILLS · ↑ ↓ 选择 · Tab / Enter 确认 · Esc 关闭</div>')+list.map((s,i)=>`<button id="skill-option-${i}" role="option" aria-selected="${i===skillIndex}" data-pick-skill="${esc(s.name)}"><b>/${esc(s.name)}</b><small>${esc(s.label)} · ${esc(s.description)}</small></button>`).join('')+(list.length?'':tr('<div class="picker-hint">没有匹配的 Skill，可点击“刷新 Skills”重新发现</div>'));
+  $('skillPicker').innerHTML=tr('<div class="picker-hint">SKILLS · ↑ ↓ 选择 · Tab / Enter 确认 · Esc 关闭</div>')+list.map((s,i)=>`<button id="skill-option-${i}" role="option" aria-selected="${i===skillIndex}" data-pick-skill="${esc(s.name)}"><b>${esc(skillLabel(s.name,skillCatalog))}</b><small>${esc(s.description)}</small></button>`).join('')+(list.length?'':tr('<div class="picker-hint">没有匹配的 Skill，可点击“刷新 Skills”重新发现</div>'));
   if(list.length)$('input').setAttribute('aria-activedescendant','skill-option-'+skillIndex);
 }
-function pickSkill(name){$('input').value=skillInput($('input').value,name);setSkill(name);hideSkillPicker();saveDraft();$('input').focus();}
+function pickSkill(name){$('input').value=$('input').value.replace(/^\/[^\s]*(?:[ \t]+|\n)?/,'');setSkill(name);hideSkillPicker();saveDraft();$('input').focus();}
 
 async function send(){
   if(!tid||!state.loaded||sending||restoring||switching||!selectedModel||modelSaving)return;
+  if(!modelCatalog?.available){notice(tr('试用次数已用完，请配置自己的模型。'),'error');return;}
+  await redline.flush();
   let entered=$('input').value.trim();
-  if(!entered){notice(tr('请输入内容后再发送。'));$('input').focus();return;}
-  const command=entered.match(/^\/([a-z0-9]+(?:-[a-z0-9]+)*)(?:\s+|$)/);
-  setSkill(command&&skillCatalog.some(s=>s.name===command[1])?command[1]:null);
-  if(selectedSkill)entered=entered.slice(command[0].length);
-  const text=entered||(selectedSkill?ui`请使用 ${selectedSkill} 处理当前合同并保存结果。`:'');
+  const command=skillCommand(entered);
+  if(command&&skillCatalog.some(s=>s.name===command[1]))setSkill(command[1]);
+  if(selectedSkill)entered=skillMessage(entered,selectedSkill,skillCatalog);
+  if(!entered&&!selectedSkill){notice(tr('请输入内容后再发送。'));$('input').focus();return;}
+  const text=entered||(selectedSkill?skillPrompt(selectedSkill,skillCatalog):'');
   if(!text)return;
   const target=tid,view=epoch,original=$('input').value;
   const body={text,risk_scheme:state.risk_scheme||riskSchemeOptions?.selected||undefined,skill:selectedSkill,quotes:quotes.get(),model:selectedModel};
@@ -572,26 +645,40 @@ async function send(){
   }catch(e){
     if(view===epoch&&state.pendingSend){state.pendingSend.status='failed';renderMessages();}
     throw e;
-  }finally{sending=false;updateControls();}
+  }finally{sending=false;updateControls();if(view===epoch)void refreshTrialUsage().catch(()=>{});}
 }
 
 function draftValue(){return {text:$('input').value,skill:selectedSkill,quotes:quotes.get(),model:selectedModel,risk_scheme:$('riskSchemeSelect').value};}
 function cachedDrafts(){try{return restoreDraft({}, {}, JSON.parse(sessionStorage.getItem('saved-drafts:'+tid)||'[]')).saved;}catch{return [];}}
 function renderQueue(){
   const shown=pendingRequest(state),queue=state.queue;
-  const html=queueHTML(queue?{...queue,items:(queue.items||[]).filter(i=>queue.paused||i.status==='failed'||i.id!==shown?.id)}:queue,modelCatalog?.models||[]),root=$('messageQueue');root.hidden=!html;
+  const html=queueHTML(queue?{...queue,items:(queue.items||[]).filter(i=>queue.paused||i.status==='failed'||i.id!==shown?.id)}:queue,modelCatalog?.models||[],skillCatalog),root=$('messageQueue');root.hidden=!html;
   if(root.innerHTML!==html)root.innerHTML=html;
   const drafts=cachedDrafts(),slot=$('savedDrafts');slot.hidden=!drafts.length;
-  slot.innerHTML=drafts.map((d,i)=>ui`<button type="button" data-restore-draft="${i}" title="${esc(d.text)}">恢复草稿：${esc((d.text||d.skill||tr("引用内容")).slice(0,24))}</button>`).join('');
+  slot.innerHTML=drafts.map((d,i)=>{const text=skillMessage(d.text||'',d.skill,skillCatalog)||(d.skill?skillLabel(d.skill,skillCatalog):tr('引用内容'));return ui`<button type="button" data-restore-draft="${i}" title="${esc(text)}">恢复草稿：${esc(text.slice(0,24))}</button>`;}).join('');
 }
 function editDraft(body,saved=cachedDrafts()){
   const result=restoreDraft(body,draftValue(),saved);
   sessionStorage.setItem('saved-drafts:'+tid,JSON.stringify(result.saved));
-  $('input').value=body.skill?skillInput(body.text||'',body.skill):body.text||'';setSkill(body.skill||null);quotes.set(body.quotes||[]);
-  if(body.model&&modelCatalog?.models.some(m=>m.id===body.model)){selectedModel=body.model;$('modelSelect').value=body.model;modelCatalog.available=true;}
+  $('input').value=skillMessage(body.text||'',body.skill,skillCatalog);setSkill(body.skill||null);quotes.set(body.quotes||[]);
+  if(body.model&&modelCatalog?.models.some(m=>m.id===body.model&&modelUsable(m,modelCatalog))){selectedModel=body.model;$('modelSelect').value=body.model;modelCatalog.available=true;}
   if(body.risk_scheme){state.risk_scheme=body.risk_scheme;$('riskSchemeSelect').value=body.risk_scheme;}
   saveDraft();renderQueue();$('input').focus();
 }
+$('todos').onclick=protect(async e=>{
+  const button=e.target.closest('button');if(!button||button.disabled)return;
+  const view=epoch,target=tid;button.disabled=true;
+  try{
+    if(button.hasAttribute('data-dismiss-todos')){
+      const result=await api(`/api/threads/${target}/tasks/dismiss`,{method:'POST',body:{signature:todoSignature(state)}});
+      if(view===epoch){state.dismissed_todos=result.dismissed_todos;renderMessages();}
+    }else if(button.hasAttribute('data-resume-todos')){
+      if(state.status?.type!=='idle'||state.questions?.length||state.permissions?.length||state.queue?.active||state.queue?.items?.length)return;
+      editDraft({text:tr('请接着完成本次任务清单中的未完成项。先核对已完成的工作与实际保存结果，避免重复执行；可恢复的错误请修正后继续，确实无法继续时说明原因并更新任务清单。')});
+      await send();
+    }
+  }finally{button.disabled=false;}
+});
 $('messageQueue').onclick=protect(async e=>{
   const button=e.target.closest('button');if(!button||button.disabled)return;
   const view=epoch,target=tid;button.disabled=true;
@@ -605,22 +692,26 @@ $('messageQueue').onclick=protect(async e=>{
       const queue=await api(`/api/threads/${target}/queue/resume`,{method:'POST',body:{}});
       if(view===epoch){state.queue=queue;renderQueue();updateControls();}
     }
-  }finally{button.disabled=false;if(button.dataset.withdrawMessage)button.textContent=tr('撤回并重新编辑');}
+  }finally{if(view===epoch)void refreshTrialUsage().catch(()=>{});button.disabled=false;if(button.dataset.withdrawMessage)button.textContent=tr('撤回并重新编辑');}
 });
 $('savedDrafts').onclick=e=>{const button=e.target.closest('[data-restore-draft]');if(!button)return;const saved=cachedDrafts(),[body]=saved.splice(Number(button.dataset.restoreDraft),1);if(body)editDraft(body,saved);};
-let lastQueuePoll=0;
-setInterval(async()=>{
-  if(!tid||queuePolling||switching||restoring||document.hidden)return;
+let lastQueuePoll=0,lastTrialRefresh=0;
+async function refreshQueue(force=false){
+  if(!tid||queuePolling||switching||restoring||!workbenchVisible())return;
   const active=state.status?.type!=='idle'||state.queue?.active||state.queue?.items?.length;
-  if(Date.now()-lastQueuePoll<(active?1500:10000))return;
+  if(!force&&Date.now()-lastQueuePoll<(active?1500:10000))return;
   lastQueuePoll=Date.now();
-  const view=epoch,target=tid;queuePolling=true;
-  try{const queue=await api(`/api/threads/${target}/queue`);if(view===epoch&&JSON.stringify(state.queue)!==JSON.stringify(queue)){state.queue=queue;reconcilePending(state);renderQueue();renderMessages();updateControls();}}
+  const view=epoch,target=tid,revision=workbenchRevision;queuePolling=true;
+  try{const queue=await api(`/api/threads/${target}/queue`);if(view!==epoch||revision!==workbenchRevision||!workbenchVisible())return;if(view===epoch&&JSON.stringify(state.queue)!==JSON.stringify(queue)){state.queue=queue;reconcilePending(state);renderQueue();renderMessages();updateControls();if(!modelSaving)await refreshTrialUsage();}if(view===epoch&&!modelSaving&&Date.now()-lastTrialRefresh>10000)await refreshTrialUsage();}
   catch{/* Reconnect and the next poll refresh the durable outbox. */}
   finally{queuePolling=false;}
-},1500);
+}
+setInterval(()=>refreshQueue(),1500);
 
-function setSkill(skill){selectedSkill=skill;$('selectedSkill').hidden=true;$('selectedSkill').replaceChildren();}
+function setSkill(skill){
+  selectedSkill=skill;$('selectedSkill').hidden=!skill;
+  $('selectedSkill').innerHTML=skill?ui`<span class="composer-skill">${icon('skill')}<b>${esc(skillLabel(skill,skillCatalog))}</b><button type="button" id="removeSkill" aria-label="取消选中的 Skill" title="取消选中的 Skill">${icon('close')}</button></span>`:'';
+}
 
 
 async function loadRiskSchemes(){
@@ -648,14 +739,32 @@ async function loadModels(){
   catch(error){if(view===epoch&&error.name!=='AbortError'){$('modelSelect').innerHTML=tr('<option value="">模型加载失败</option>');$('modelRetry').hidden=false;}throw error;}
   if(view!==epoch)return;
   modelCatalog=catalog;selectedModel=modelCatalog.selected;
-  $('modelSelect').innerHTML=modelCatalog.models.map(m=>`<option value="${esc(m.id)}">${esc(m.label)}</option>`).join('');
-  if(!modelCatalog.available)$('modelSelect').insertAdjacentHTML('afterbegin',tr('<option value="">请选择可用模型</option>'));
-  $('modelSelect').value=modelCatalog.available?selectedModel:'';renderQueue();updateControls();
+  renderModels();
+}
+function renderModels(){
+  selectedModel=availableModel(modelCatalog,selectedModel);
+  modelCatalog.available=modelUsable(modelCatalog.models.find(m=>m.id===selectedModel),modelCatalog);
+  $('modelSelect').innerHTML=modelOptionsHTML({...modelCatalog,selected:selectedModel});
+  $('modelSelect').value=modelCatalog.available?selectedModel:'';
+  $('modelSelect').title=!modelCatalog.available?tr('试用次数已用完，请配置自己的模型。'):tr('用于下一条消息，选择仅为当前对话保存');
+  renderQueue();updateControls();
+}
+async function refreshTrialUsage(){
+  const view=epoch;
+  const me=await api('/api/me');
+  if(view!==epoch||!modelCatalog)return;
+  lastTrialRefresh=Date.now();
+  if(modelCatalog.trial_remaining===me.trial.remaining)return;
+  modelCatalog.trial_remaining=me.trial.remaining;
+  renderModels();
 }
 $('modelRetry').onclick=protect(()=>loadModels());
 $('modelSelect').onchange=protect(async e=>{
-  const view=epoch,target=tid,previous=selectedModel,next=e.target.value;modelSaving=true;updateControls();
-  try{await api('/api/threads/'+target+'/model',{method:'PUT',body:{model:next}});if(view===epoch){selectedModel=next;modelCatalog.available=true;}}
+  const next=e.target.value;
+  if(next===configureModelValue){e.target.value=modelCatalog.available?selectedModel:'';notice(tr('试用次数已用完，请配置自己的模型。'));await settingsUI.open('providers');return;}
+  if(!modelUsable(modelCatalog.models.find(m=>m.id===next),modelCatalog)){e.target.value=modelCatalog.available?selectedModel:'';return;}
+  const view=epoch,target=tid,previous=selectedModel;modelSaving=true;updateControls();
+  try{await api('/api/threads/'+target+'/model',{method:'PUT',body:{model:next}});if(view===epoch){selectedModel=next;renderModels();}}
   catch(error){if(view===epoch)e.target.value=previous;throw error;}
   finally{modelSaving=false;updateControls();}
 });
@@ -684,7 +793,7 @@ $('newThread').onclick=protect(async()=>{
 });
 $('attachButton').onclick=$('railAttachButton').onclick=()=>$('attachmentInput').click();
 $('attachmentInput').onchange=protect(async e=>{const file=e.target.files[0];if(!file)return;await upload(`/api/threads/${tid}/attachments`,file);e.target.value='';await restore();});
-$('sendBtn').onclick=protect(send);$('input').oninput=()=>{const command=$('input').value.match(/^\/([a-z0-9-]+)(?:\s|$)/);setSkill(command&&skillCatalog.some(s=>s.name===command[1])?command[1]:null);saveDraft();skillIndex=0;renderSkillPicker();};
+$('sendBtn').onclick=protect(send);$('input').oninput=()=>{const command=skillCommand($('input').value);if(command&&skillCatalog.some(s=>s.name===command[1])){setSkill(command[1]);$('input').value=withoutSkillCommand($('input').value,command[1]);}saveDraft();skillIndex=0;renderSkillPicker();};
 $('input').onkeydown=e=>{
   if(e.isComposing)return;
   if(!$('skillPicker').hidden){
@@ -719,8 +828,9 @@ $('compareArtifacts').onclick=protect(async()=>{
   reading.showArtifact();
   try{await openArtifact(workspace.artifacts.find(a=>a.id!==artifactId).id,true);}catch(error){clearComparison();renderArtifactPicker();throw error;}
 });
-$('viewText').onclick=protect(async()=>{sourceMode='text';await renderSource();});
-$('viewOriginal').onclick=protect(async()=>{sourceMode='original';await renderSource();});
+$('viewText').onclick=protect(async()=>{await redline.close();sourceMode='text';await renderSource();});
+$('viewRedline').onclick=protect(async()=>{if(!source||!tid)return;await redline.open({documentId:source.id,threadId:tid,user:identity,host:$('redlineHost')});});
+$('viewOriginal').onclick=protect(async()=>{await redline.close();sourceMode='original';await renderSource();});
 function syncPanelToggles(){
   const mobile=innerWidth<=1020;
   const states=[['toggleRail',tr('工作区'),mobile?document.body.classList.contains('rail-mobile'):!document.body.classList.contains('workspace-rail-collapsed')]];

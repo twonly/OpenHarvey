@@ -12,7 +12,7 @@ const dom=()=>{const nodes={};return id=>nodes[id]??={innerHTML:'',hidden:false,
 
 test('source reads share an in-flight request and an older document cannot overwrite the new one',async()=>{
  const calls=[],$=dom();
- const context={$,epoch:1,sourceEpoch:0,sourceRequest:null,source:null,sourceRendered:false,tid:'thread',state:{documents:[]},viewRequests:new AbortController(),sourceNavigation:{setDocument(){}},quotes:{hide(){}},loadingHTML:s=>s,esc:s=>s,renderDocs(){},renderSource:async()=>{},api:()=>{const gate=deferred();calls.push(gate);return gate.promise;}};
+ const context={redline:{documentId:null},$,epoch:1,sourceEpoch:0,sourceRequest:null,stopPdfPages(){},source:null,sourceRendered:false,tid:'thread',state:{documents:[]},viewRequests:new AbortController(),sourceNavigation:{setDocument(){}},quotes:{hide(){}},loadingHTML:s=>s,esc:s=>s,renderDocs(){},renderSource:async()=>{},api:()=>{const gate=deferred();calls.push(gate);return gate.promise;}};
  runInNewContext(section('async function loadSource(','\nasync function renderSource'),context);
  const a=context.loadSource('a'),duplicate=context.loadSource('a');assert.equal(calls.length,1);
  const b=context.loadSource('b');assert.equal(calls.length,2);
@@ -25,7 +25,7 @@ test('source reads share an in-flight request and an older document cannot overw
 
 test('restoring history completes even while source, artifacts, and seen acknowledgement remain pending',async()=>{
  const pending=new Promise(()=>{}),jobs=[],$=dom();
- const context={$,epoch:1,restoring:false,restoreEpoch:0,buffer:[],state:{},tid:'t',source:null,sourceRequest:null,sourceRendered:false,viewRequests:new AbortController(),workspace:{threads:[{id:'t'}]},threadFilter:'active',
+ const context={$,epoch:1,restoring:false,restoreEpoch:0,buffer:[],state:{},tid:'t',source:null,sourceRequest:null,stopPdfPages(){},sourceRendered:false,viewRequests:new AbortController(),workspace:{threads:[{id:'t'}]},threadFilter:'active',
   api:async()=>({title:'ready',documents:[{id:'doc',thread_id:null}],messages:[]}),updateControls(){},reconcilePending(){},renderSkills(){},messageIssue(){},renderQueue(){},renderMessages(){},renderRequests(){},renderDocs(){},notice(){},refreshWorkspace:()=>pending,markThreadSeen:()=>pending,refreshThreadActivity(){},threadScope:()=> 'active',loadSource:()=>pending,background:job=>jobs.push(job)};
  runInNewContext(section('async function restore(','\nfunction receive'),context);
  await context.restore();assert.equal(context.state.loaded,true);assert.equal(context.restoring,false);assert.equal(jobs.length,3);

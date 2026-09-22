@@ -54,12 +54,6 @@ export function setupReading(){
   sourceHost.addEventListener('error',event=>{
     if(event.target.matches('.pdf-page img'))event.target.closest('.pdf-page').querySelector('.pdf-page-loading').innerHTML=tr('<p>此页加载失败。<button data-retry-page>重新加载</button></p>');
   },true);
-  sourceHost.addEventListener('click',event=>{
-    if(!event.target.closest('[data-retry-page]'))return;
-    const page=event.target.closest('.pdf-page'),img=page.querySelector('img'),url=img.currentSrc||img.src;
-    page.querySelector('.pdf-page-loading').innerHTML=loadingHTML(tr('正在加载页面…'));
-    img.removeAttribute('srcset');img.src=url;
-  });
   const pane=$('contextPane');let mode='stacked';
   const hidden=new Set();
   const visible=name=>{
@@ -129,7 +123,7 @@ export function setupReading(){
 
 export function pdfMarkup(doc,tid){
   const pages=new Map();for(const seg of doc.segments){if(!pages.has(seg.page))pages.set(seg.page,[]);pages.get(seg.page).push(seg);}
-  return doc.pages.map((p,i)=>ui`<div class="pdf-page" data-page="${i+1}" style="aspect-ratio:${p.w}/${p.h}"><div class="pdf-page-loading">${loadingHTML(tr("正在加载第 ")+(i+1)+tr(" 页…"))}</div><img loading="lazy" draggable="false" src="/api/documents/${doc.id}/pages/${i+1}?width=960${tid?'&thread_id='+encodeURIComponent(tid):''}" srcset="${[960,1920,2880].map(width=>`/api/documents/${doc.id}/pages/${i+1}?width=${width}${tid?'&thread_id='+encodeURIComponent(tid):''} ${width}w`).join(', ')}" sizes="auto, (max-width: 950px) 100vw, 950px" decoding="async" alt="第 ${i+1} 页"><div class="pdf-text-layer">${(pages.get(i+1)||[]).filter(s=>s.bbox).map(s=>{const b=s.bbox;return `<span data-block="${s.id}" data-font-height="${(b[3]-b[1])/p.w}" style="left:${b[0]/p.w*100}%;top:${b[1]/p.h*100}%;width:${(b[2]-b[0])/p.w*100}%;height:${(b[3]-b[1])/p.h*100}%"><span>${esc(s.text)}</span></span>`;}).join('')}</div></div>`).join('');
+  return doc.pages.map((p,i)=>ui`<div class="pdf-page" data-page="${i+1}" style="aspect-ratio:${p.w}/${p.h}"><div class="pdf-page-loading">${loadingHTML(tr("正在加载第 ")+(i+1)+tr(" 页…"))}</div><img draggable="false" decoding="async" alt="第 ${i+1} 页"><div class="pdf-text-layer">${(pages.get(i+1)||[]).filter(s=>s.bbox).map(s=>{const b=s.bbox;return `<span data-block="${s.id}" data-font-height="${(b[3]-b[1])/p.w}" style="left:${b[0]/p.w*100}%;top:${b[1]/p.h*100}%;width:${(b[2]-b[0])/p.w*100}%;height:${(b[3]-b[1])/p.h*100}%"><span>${esc(s.text)}</span></span>`;}).join('')}</div></div>`).join('');
 }
 
 export function fitPdfText(host){
@@ -140,8 +134,6 @@ export function fitPdfText(host){
   for(const [page,width] of pages){
     if(!width||Number(page.dataset.textWidth)===width)continue;
     page.dataset.textWidth=String(width);
-    // Let the browser pick physical pixels for this panel width and screen DPR.
-    const image=page.querySelector('img');if(image)image.sizes=`auto, ${width}px`;
     for(const line of page.querySelectorAll('.pdf-text-layer>[data-block]')){
       const font=Number(line.dataset.fontHeight)*width,text=line.firstElementChild;
       ctx.font=`${font}px sans-serif`;text.style.fontSize=font+'px';

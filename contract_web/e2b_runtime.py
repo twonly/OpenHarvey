@@ -1,9 +1,11 @@
-"""Concrete E2B/OpenCode integration. SQLite is the binding and history authority.
+"""Concrete E2B/OpenCode integration. SQLite owns bindings and saved history.
 
-No provider abstraction: only this module calls the E2B SDK. Reads of history
-never provision or resume a VM; execution explicitly calls prepare().
+Live text is projected in memory and saved in background batches. Reads of
+history never provision or resume a VM; execution explicitly calls prepare().
 """
 import asyncio
+import copy
+import logging
 import httpx
 import hashlib
 import json
@@ -32,6 +34,13 @@ class E2B:
         self.last_create = 0
         self.event_revisions = {}
         self.history_locks = defaultdict(threading.Lock)
+        self.persist_locks = defaultdict(threading.Lock)
+        self.live_history = {}
+        self.live_secrets = {}
+        self.saved_revisions = {}
+        self.last_collected = {}
+        self.sync_requested = set()
+        self.history_listeners = defaultdict(set)
         self.stream_ready = {}
         self.renewed = {}
         self.unhealthy = set()
@@ -41,6 +50,7 @@ class E2B:
         self.path_cache = {}
         self.pending_checkpoints = set()
         self.artifacts = self.traces = None
+        self.runtime_revision = hashlib.sha256(b''.join((ROOT / name).read_bytes() for name in ('runtime/agent.md','runtime/plugins/memory.js'))).hexdigest()
         self.template = os.environ.get('E2B_TEMPLATE', 'contract-opencode-1-16-2')
         self.enabled = os.environ.get('CW_SANDBOX_BACKEND', 'e2b') == 'e2b'
         with store.connect() as db:
@@ -64,6 +74,8 @@ class E2B:
                   request_id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, execution_id TEXT NOT NULL,
                   hash TEXT NOT NULL, receipt TEXT NOT NULL, delivered INTEGER NOT NULL DEFAULT 0);
             ''')
+            if 'runtime_revision' not in {r[1] for r in db.execute('PRAGMA table_info(e2b_bindings)')}:
+                db.execute("ALTER TABLE e2b_bindings ADD COLUMN runtime_revision TEXT NOT NULL DEFAULT ''")
         from .skill_sync import SkillSync
         self.skill_sync=SkillSync(self)
         p=store.root/'secrets'/'deployment-id'
@@ -83,7 +95,7 @@ class E2B:
     def state(self, wid, **fields):
         self.store.execute('INSERT OR IGNORE INTO e2b_bindings(workspace_id) VALUES(?)',(wid,))
         if fields:
-            allowed={'sandbox_id','generation','template','status','credentials','revision','last_activity','started','synced','error'}
+            allowed={'sandbox_id','generation','template','status','credentials','revision','last_activity','started','synced','error','runtime_revision'}
             if set(fields)-allowed: raise ValueError('无效 E2B 状态字段')
             self.store.execute('UPDATE e2b_bindings SET '+','.join(k+'=?' for k in fields)+' WHERE workspace_id=?',(*fields.values(),wid))
         return self.binding(wid)
@@ -183,11 +195,14 @@ class E2B:
                 'headers':{'e2b-traffic-access-token':sbx.traffic_access_token}})
             config={**native,'share':'disabled','autoupdate':False,'snapshot':False,'permission':{'*':'deny'},
                     'agent':{'probe':{'mode':'primary','prompt':'Reply OK. Do not use tools.'}}}
+            config['plugin']=['file:///tmp/probe/request-params.js']
+            await sbx.files.write('/tmp/probe/request-params.js',(ROOT/'runtime/plugins/request-params.js').read_text())
             await sbx.files.write('/tmp/probe/config.json',encoded(config))
-            env={'OPENCODE_CONFIG':'/tmp/probe/config.json','OPENCODE_SERVER_PASSWORD':secret,
+            env={'OPENCODE_TEST_HOME':'/tmp/probe/home','OPENCODE_CONFIG':'/tmp/probe/config.json','OPENCODE_SERVER_PASSWORD':secret,
                  'XDG_CONFIG_HOME':'/tmp/probe/config','XDG_DATA_HOME':'/tmp/probe/data',
                  'OPENCODE_DISABLE_CLAUDE_CODE':'true','OPENCODE_DISABLE_EXTERNAL_SKILLS':'true'}
-            await sbx.commands.run('opencode serve --pure --hostname 0.0.0.0 --port 4096',envs=env,background=True,timeout=0)
+            await sbx.commands.run('mkdir -p /tmp/probe/config/opencode && chmod 555 /tmp/probe/config/opencode')
+            await sbx.commands.run('opencode serve '+('' if any(p.get('options',{}).get('workbenchExtraBody') for p in config.get('provider',{}).values()) else '--pure ')+'--hostname 0.0.0.0 --port 4096',envs=env,background=True,timeout=0)
             for _ in range(60):
                 if await self.healthy(rt):break
                 await asyncio.sleep(.5)
@@ -242,6 +257,7 @@ class E2B:
         latest=self.store.one('SELECT revision FROM model_versions WHERE org_id=? AND validated=1 ORDER BY revision DESC LIMIT 1',(self.models.scope(u),))
         warm=(wid in self.handles and prior and prior['status']=='ready' and wid not in self.unhealthy
               and wid in self.renewed and time.monotonic()-self.renewed[wid]<TTL-30
+              and (prior.get('runtime_revision')==self.runtime_revision or self.other_active(wid,t['id']))
               and prior['template']==self.template and latest and prior['revision']==latest['revision']
               and (not prior['started'] or time.time()-prior['started']<600 or self.other_active(wid,t['id'])))
         if warm and not recovering:
@@ -334,7 +350,7 @@ class E2B:
                 except Exception:
                     await sbx.pause();self.handles.pop(wid,None)
                     self.state(wid,status='recovery_failed');raise
-            booted=created or not await self.healthy(rt) or b['revision']!=latest['revision']
+            booted=created or not await self.healthy(rt) or b['revision']!=latest['revision'] or (not other_active and b.get('runtime_revision')!=self.runtime_revision)
             if booted:
                 if other_active:raise RuntimeError('运行服务暂不可用；其他对话尚未结束，请稍后重试')
                 self.progress(t,'starting')
@@ -377,7 +393,7 @@ class E2B:
         self.state(wid,status='starting',revision=0)
         self.permission_cache={k:v for k,v in self.permission_cache.items() if k[0]!=wid}
         self.path_cache={k:v for k,v in self.path_cache.items() if k[0]!=wid}
-        await sbx.commands.run('mkdir -p /workspace/threads /workspace/input /workspace/output /workspace/published /workspace/exchange /opt/contract-runtime /var/lib/contract-opencode /var/log/contract-opencode && chown -R user:user /workspace /opt/contract-runtime /var/lib/contract-opencode /var/log/contract-opencode',user='root')
+        await sbx.commands.run('mkdir -p /workspace/threads /workspace/input /workspace/output /workspace/published /workspace/exchange/memory /opt/contract-runtime /var/lib/contract-opencode /var/log/contract-opencode && chown -R user:user /workspace /opt/contract-runtime /var/lib/contract-opencode /var/log/contract-opencode',user='root')
         version=await sbx.commands.run('opencode --version')
         if version.stdout.strip()!='1.16.2': raise RuntimeError('E2B 模板须固定使用 OpenCode 1.16.2，请先构建配套模板')
         uploads=[]
@@ -397,7 +413,7 @@ class E2B:
             await sbx.commands.run('chmod 755 /opt/contract-runtime/scripts/feishu_cli.py && ln -sf /opt/contract-runtime/scripts/feishu_cli.py /usr/local/bin/lark-cli',user='root')
         self.record(wid,'opencode.files.ready',{'elapsed_ms':round((time.monotonic()-begin)*1000)})
         rt=self.runtime(u,w)
-        env={'XDG_DATA_HOME':'/var/lib/contract-opencode/data','XDG_CONFIG_HOME':'/var/lib/contract-opencode/config',
+        env={'OPENCODE_TEST_HOME':'/var/lib/contract-opencode/home','XDG_DATA_HOME':'/var/lib/contract-opencode/data','XDG_CONFIG_HOME':'/var/lib/contract-opencode/config',
              'XDG_STATE_HOME':'/var/lib/contract-opencode/state','XDG_CACHE_HOME':'/var/lib/contract-opencode/cache',
              'OPENCODE_CONFIG':'/var/lib/contract-opencode/opencode.json','OPENCODE_SERVER_PASSWORD':rt.config['password'],
              'OPENCODE_DISABLE_CLAUDE_CODE':'true','OPENCODE_DISABLE_EXTERNAL_SKILLS':'true','OPENCODE_ENABLE_QUESTION_TOOL':'true',
@@ -405,7 +421,8 @@ class E2B:
              'OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX':'384000'}
         # Dedicated PID file, never broad pkill. Only used at idle turn boundaries.
         await sbx.commands.run("if test -f /var/lib/contract-opencode/service.pid; then kill $(cat /var/lib/contract-opencode/service.pid) 2>/dev/null || true; fi")
-        await sbx.commands.run("echo $$ > /var/lib/contract-opencode/service.pid; exec opencode --print-logs serve --pure --hostname 0.0.0.0 --port 4096 >> /var/log/contract-opencode/service.log 2>&1",envs=env,cwd='/workspace/threads',background=True,timeout=0)
+        await sbx.commands.run("mkdir -p /var/lib/contract-opencode/config/opencode && chmod 555 /var/lib/contract-opencode/config/opencode")
+        await sbx.commands.run("echo $$ > /var/lib/contract-opencode/service.pid; exec opencode --print-logs serve "+("" if any(p.get("options",{}).get("workbenchExtraBody") for p in config.get("provider",{}).values()) else "--pure ")+"--hostname 0.0.0.0 --port 4096 >> /var/log/contract-opencode/service.log 2>&1",envs=env,cwd='/workspace/threads',background=True,timeout=0)
         self.record(wid,'opencode.process.started',{'elapsed_ms':round((time.monotonic()-begin)*1000)})
         deadline=time.monotonic()+30
         while time.monotonic()<deadline:
@@ -425,6 +442,7 @@ class E2B:
         except RuntimeError as exc:
             self.record(wid,'opencode.boot.failed',{'phase':phase,'cause':type(exc.__cause__).__name__})
             raise
+        self.state(wid,runtime_revision=self.runtime_revision)
         self.record(wid,'opencode.ready',{'duration_ms':round((time.monotonic()-begin)*1000)})
 
     async def sync_files(self,u,t,sbx=None):
@@ -442,8 +460,12 @@ class E2B:
             shared=[]
             for d in docs:
                 for p in (self.store.user_root(u['id'])/'sources'/d['id']).rglob('*'):
-                    if p.is_file():shared.append((p,str(PurePosixPath(rt.source_path(d['id'])).parent/p.name)))
+                    if p.is_file() and 'redline' not in p.relative_to(self.store.user_root(u['id'])/'sources'/d['id']).parts:shared.append((p,str(PurePosixPath(rt.source_path(d['id'])).parent/p.name)))
             for a in artifacts:
+                manifest=self.store.user_root(u['id'])/'published'/a['id']/'report.json'
+                report=json.loads(manifest.read_text()) if manifest.exists() else {}
+                if report.get('redline') and self.store.one('SELECT 1 FROM documents WHERE id=? AND thread_id IS NOT NULL',(report.get('document_id'),)):
+                    continue # Attachment redlines are delivered by scoped HTTP tools, never shared sandbox files.
                 for p in (self.store.user_root(u['id'])/'published'/a['id']).glob('*'):
                     if p.is_file():shared.append((p,'/workspace/published/'+a['id']+'/'+p.name))
         else:shared=prior[1]
@@ -457,7 +479,7 @@ class E2B:
                 provider['headers']=headers;path.write_text(encoded(config))
         # Fixed application-owned files only: no recursive scan of agent output.
         pairs=shared+[(wd/name,rt.directory(t['id'])+'/'+name) for name in
-                      ('context.json','risk-library.json','opencode.json','.skill-versions.json') if (wd/name).is_file()]
+                      ('context.json','risk-library.json','opencode.json','.skill-versions.json','.memory-capability') if (wd/name).is_file()]
         changed=[];stats={}
         for local,remote in pairs:
             stat=local.stat();stamp=(stat.st_mtime_ns,stat.st_size,stat.st_ino)
@@ -488,41 +510,150 @@ class E2B:
                                     'duration_ms':round((time.monotonic()-begin)*1000)},t['id'])
 
     def history(self,tid):
+        with self.history_locks[tid]:
+            live=copy.deepcopy(self.live_history.get(tid))
+            secrets=self.live_secrets.get(tid,())
+        if live is not None:
+            return redact(live[0],secrets),redact(live[1],secrets)
         row=self.store.one('SELECT * FROM e2b_history WHERE thread_id=?',(tid,))
         return (json.loads(row['messages']),json.loads(row['snapshot'])) if row else ([],{})
 
     def snapshot(self,tid):
+        with self.history_locks[tid]:
+            live=self.live_history.get(tid)
+            if live is not None:return redact(copy.deepcopy(live[1]),self.live_secrets.get(tid,()))
         row=self.store.one('SELECT snapshot FROM e2b_history WHERE thread_id=?',(tid,))
         return json.loads(row['snapshot']) if row else {}
 
+    def history_changed(self,tid):
+        for loop,changed in tuple(self.history_listeners[tid]):
+            if not loop.is_closed():loop.call_soon_threadsafe(changed.set)
+
+    def load_live_history(self,u,t):
+        tid=t['id']
+        secrets=self.secrets(u,t['workspace_id'])
+        history=self.history(tid)
+        with self.history_locks[tid]:
+            self.live_secrets[tid]=secrets
+            self.live_history.setdefault(tid,history)
+
+    def persist_history(self,u,t):
+        """One coalesced snapshot; disk I/O never holds the live-state lock."""
+        tid=t['id']
+        with self.persist_locks[tid]:
+            with self.history_locks[tid]:
+                revision=self.event_revisions.get(tid,0)
+                if tid not in self.live_history or self.saved_revisions.get(tid)==revision:return
+                messages,snapshot=copy.deepcopy(self.live_history[tid])
+                secrets=self.live_secrets.get(tid,())
+            clean,snapshot=redact(messages,secrets),redact(snapshot,secrets)
+            self.store.execute('INSERT INTO e2b_history VALUES(?,?,?,?) ON CONFLICT(thread_id) DO UPDATE SET messages=excluded.messages,snapshot=excluded.snapshot,synced=excluded.synced',
+                               (tid,encoded(clean),encoded(snapshot),time.time()))
+            self.state(t['workspace_id'],synced=time.time())
+            self.saved_revisions[tid]=revision
+
+    async def persist_loop(self,u,t):
+        while True:
+            await asyncio.sleep(.5)
+            try:await asyncio.to_thread(self.persist_history,u,t)
+            except Exception:
+                # A failed save must not disconnect or stall the visible stream.
+                logging.getLogger(__name__).warning('Background history save failed for thread %s; retrying',t['id'])
+
     async def collect_thread(self,u,t):
+        # Concurrent recovery/maintenance callers share the completed collection.
+        started = time.monotonic()
+        async with self.manager.lock('snapshot-' + t['id']):
+            if self.last_collected.get(t['id'], 0) > started:
+                return
+            await self._collect_thread(u, t)
+
+    async def _collect_thread(self,u,t):
         rt=Runtime(self.config(u,{'id':t['workspace_id']}))
         if t['session_id'].startswith('pending_'): return
+        self.sync_requested.discard(t['id'])
         revision=self.event_revisions.get(t['id'],0)
-        messages=await rt.messages(t)
         paths=[('status','/session/status'),('questions','/question'),('permissions','/permission'),('todos',f'/session/{t["session_id"]}/todo'),('info',f'/session/{t["session_id"]}')]
-        values=await asyncio.gather(*(Runtime.call(rt,'GET',path,tid=t['id']) for _,path in paths))
-        snapshot=dict(zip((key for key,_ in paths),values))
-        await asyncio.to_thread(self.save_snapshot,u,t,messages,snapshot,revision)
+        try:
+            async with rt.client() as client:
+                rt.request_client = client
+                messages=await rt.messages(t)
+                values=await asyncio.gather(*(Runtime.call(rt,'GET',path,tid=t['id']) for _,path in paths))
+            snapshot=dict(zip((key for key,_ in paths),values))
+            await asyncio.to_thread(self.save_snapshot,u,t,messages,snapshot,revision)
+            # A healthy stream may have advanced while the request was in flight.
+            # Retain those newer events without refetching all history every tick.
+            self.last_collected[t['id']] = time.monotonic()
+        except BaseException:
+            self.sync_requested.add(t['id'])
+            raise
+
+    async def refresh_threads(self, u, threads):
+        """SSE is the normal source; recover gaps and reconcile periodically."""
+        limit = asyncio.Semaphore(3)
+        async def refresh(t):
+            tid = t['id']
+            if t['session_id'].startswith('pending_'):
+                return
+            connected = self.stream_ready.get(tid)
+            interval = 60 if connected and connected.is_set() else 5
+            if tid not in self.sync_requested and time.monotonic() - self.last_collected.get(tid, 0) < interval:
+                return
+            async with limit:
+                await self.collect_thread(u, t)
+        await asyncio.gather(*(refresh(t) for t in threads))
 
     def save_snapshot(self,u,t,messages,snapshot,revision):
-        # Stream writes and HTTP snapshots must commit in revision order, including
-        # when a cancelled async caller still has a persistence worker finishing.
-        with self.history_locks[t['id']]:
-            self._save_snapshot(u,t,messages,snapshot,revision)
-
-    def _save_snapshot(self,u,t,messages,snapshot,revision):
-        if revision!=self.event_revisions.get(t['id'],0):return
         snapshot['status']=snapshot['status'].get(t['session_id'],{'type':'idle'})
         for field in ('questions','permissions'):
             snapshot[field]=[item for item in snapshot[field] if item.get('sessionID')==t['session_id']]
-        clean=redact([{**m,'parts':[p for p in m.get('parts',[]) if p.get('type')!='reasoning']} for m in messages],self.secrets(u,t['workspace_id']))
-        self.store.execute('INSERT INTO e2b_history VALUES(?,?,?,?) ON CONFLICT(thread_id) DO UPDATE SET messages=excluded.messages,snapshot=excluded.snapshot,synced=excluded.synced',
-            (t['id'],encoded(clean),encoded(redact(snapshot,self.secrets(u,t['workspace_id']))),time.time()))
+        snapshot['last_assistant'] = next((m['info'] for m in reversed(messages) if m['info']['role']=='assistant'), {})
+        secrets=self.secrets(u,t['workspace_id'])
+        clean=redact([{**m,'parts':[p for p in m.get('parts',[]) if p.get('type')!='reasoning']} for m in messages],secrets)
+        projection = (clean, redact(snapshot,secrets))
+        with self.history_locks[t['id']]:
+            if revision!=self.event_revisions.get(t['id'],0):return False
+            unchanged = self.live_history.get(t['id']) == projection
+            self.live_history[t['id']]=projection
+            self.live_secrets[t['id']]=secrets
+            if not unchanged:self.event_revisions[t['id']]=revision+1
+        if not unchanged:self.history_changed(t['id'])
+        self.persist_history(u,t)
         if self.traces:self.traces.sync(u,t,clean,snapshot['status'])
-        self.state(t['workspace_id'],synced=time.time())
+        return True
+
+    def activity_snapshots(self, threads):
+        if not threads:return {}
+        wid = threads[0]['workspace_id']
+        rows = self.store.all('SELECT h.thread_id,h.snapshot FROM e2b_history h JOIN threads t ON t.id=h.thread_id WHERE t.workspace_id=? AND t.deleted_at IS NULL', (wid,))
+        snapshots = {row['thread_id']: json.loads(row['snapshot']) for row in rows}
+        for t in threads:
+            tid = t['id']
+            # Only overlay the requested workspace; callers never start a VM.
+            if tid in self.live_history:
+                snapshots[tid] = self.snapshot(tid)
+        return snapshots
+
+    def last_assistant(self, tid):
+        snap = self.snapshot(tid)
+        if 'last_assistant' in snap:
+            return snap['last_assistant']
+        # One-time compatibility path for snapshots saved before this field.
+        messages, _ = self.history(tid)
+        info = next((m['info'] for m in reversed(messages) if m['info']['role']=='assistant'), {})
+        with self.history_locks[tid]:
+            if tid in self.live_history:
+                snap = self.live_history[tid][1]
+                snap.setdefault('last_assistant', info)
+                self.event_revisions[tid] = self.event_revisions.get(tid, 0) + 1
+                return copy.deepcopy(snap['last_assistant'])
+        self.store.execute("UPDATE e2b_history SET snapshot=json_set(snapshot,'$.last_assistant',json(?)) WHERE thread_id=? AND json_type(snapshot,'$.last_assistant') IS NULL", (encoded(info), tid))
+        return info
 
     def watch(self,u,t):
+        # Refresh at dispatch/maintenance boundaries, including provider rotation,
+        # rather than querying and decrypting credentials for every token.
+        self.live_secrets[t['id']]=self.secrets(u,t['workspace_id'])
         task=self.streams.get(t['id'])
         if not task or task.done():
             self.stream_ready[t['id']]=asyncio.Event()
@@ -530,32 +661,40 @@ class E2B:
         return self.stream_ready[t['id']]
 
     def ingest_event(self,u,t,event):
-        """Persist native SSE updates directly; never await history HTTP per token."""
+        """Update memory only. Persistence runs independently at most twice/second."""
+        if t['id'] not in self.live_history:self.load_live_history(u,t)
         with self.history_locks[t['id']]:
-            self._ingest_event(u,t,event)
+            changed=self._ingest_event(u,t,event)
+        if changed:self.history_changed(t['id'])
 
     def _ingest_event(self,u,t,event):
         p=event.get('properties',{});kind=event.get('type')
         owner=p.get('sessionID') or p.get('info',{}).get('sessionID') or p.get('part',{}).get('sessionID')
         if kind=='session.updated':owner=p.get('info',{}).get('id')
         if owner!=t['session_id']:return
-        messages,snap=self.history(t['id'])
+        messages,snap=self.live_history[t['id']]
         if kind=='message.updated':
-            info=p['info'];found=next((m for m in messages if m['info']['id']==info['id']),None)
+            info=copy.deepcopy(p['info']);found=next((m for m in messages if m['info']['id']==info['id']),None)
             if found:found['info']=info
             else:messages.append({'info':info,'parts':[]})
+            snap['last_assistant'] = next((m['info'] for m in reversed(messages) if m['info']['role']=='assistant'), {})
         elif kind=='message.part.updated':
-            part=p['part']
+            part=copy.deepcopy(p['part'])
             if part.get('type')=='reasoning':return
             found=next((m for m in messages if m['info']['id']==part['messageID']),None)
-            if found is None:return # A full snapshot will recover missed message headers.
+            if found is None:
+                self.sync_requested.add(t['id'])
+                return # Recover a missing message header at the next maintenance tick.
             found['parts']=[part if old['id']==part['id'] else old for old in found['parts']] if any(old['id']==part['id'] for old in found['parts']) else [*found['parts'],part]
         elif kind=='message.part.delta':
             part=next((part for m in messages if m['info']['id']==p['messageID'] for part in m['parts'] if part['id']==p['partID']),None)
             if not part or part.get('type')!='text' or p.get('field')!='text':return
             part['text']=part.get('text','')+p['delta']
         elif kind=='session.updated':snap['info']=p['info']
-        elif kind=='session.status':snap['status']=p['status']
+        elif kind=='session.status':
+            if snap.get('status',{}).get('type') != 'idle' and p['status'].get('type') == 'idle':
+                self.sync_requested.add(t['id'])
+            snap['status']=p['status']
         elif kind=='todo.updated':snap['todos']=p['todos']
         elif kind in {'question.asked','permission.asked'}:
             field='questions' if kind.startswith('question.') else 'permissions'
@@ -565,20 +704,34 @@ class E2B:
             snap[field]=[q for q in snap.get(field,[]) if q['id']!=p['requestID']]
         else:return
         self.event_revisions[t['id']]=self.event_revisions.get(t['id'],0)+1
-        secret_values=self.secrets(u,t['workspace_id'])
-        clean=redact(messages,secret_values);snapshot=redact(snap,secret_values)
-        self.store.execute('INSERT INTO e2b_history VALUES(?,?,?,?) ON CONFLICT(thread_id) DO UPDATE SET messages=excluded.messages,snapshot=excluded.snapshot,synced=excluded.synced',
-                           (t['id'],encoded(clean),encoded(snapshot),time.time()))
-        self.state(t['workspace_id'],synced=time.time())
+        return True
 
     async def stream(self,u,t):
+        await asyncio.to_thread(self.load_live_history,u,t)
+        writer=asyncio.create_task(self.persist_loop(u,t))
+        try:await self.receive_stream(u,t)
+        finally:
+            writer.cancel()
+            await asyncio.gather(writer,return_exceptions=True)
+            # Best effort on normal shutdown; abrupt termination can lose the tail.
+            try:await asyncio.to_thread(self.persist_history,u,t)
+            except Exception:logging.getLogger(__name__).warning('Final history save failed for thread %s',t['id'])
+            with self.history_locks[t['id']]:
+                if self.saved_revisions.get(t['id'])==self.event_revisions.get(t['id'],0):
+                    self.live_history.pop(t['id'],None)
+                    self.live_secrets.pop(t['id'],None)
+            self.history_changed(t['id'])
+
+    async def receive_stream(self,u,t):
         last_error=None
         while t['workspace_id'] in self.handles:
             try:
                 rt=Runtime(self.config(u,{'id':t['workspace_id']}))
                 async for event in Runtime.events(rt,t):
-                    if event.get('type')=='server.connected':self.stream_ready[t['id']].set()
-                    await asyncio.to_thread(self.ingest_event,u,t,event)
+                    if event.get('type')=='server.connected':
+                        self.sync_requested.add(t['id'])
+                        self.stream_ready[t['id']].set()
+                    self.ingest_event(u,t,event)
             except asyncio.CancelledError:raise
             except Exception as exc:
                 self.stream_ready[t['id']].clear()
@@ -588,6 +741,7 @@ class E2B:
             finally:self.stream_ready[t['id']].clear()
 
     async def collect_submissions(self,u,w,sbx):
+        if getattr(self,'memory',None): await self.memory.collect(u,w,sbx)
         if getattr(self,'feishu',None):await self.feishu.collect(u,w,sbx)
         entries=await sbx.files.list('/workspace/exchange',depth=1)
         for entry in entries:
@@ -613,12 +767,15 @@ class E2B:
                     if latest['id']!=e['id']:raise ValueError('保存申请已过期，请重新生成')
                     # Validation uses fresh native evidence, not the redacted UI
                     # mirror (redaction can alter quoted contract text).
-                    native=await Runtime(self.config(u,w)).messages(t)
+                    native=[] if payload.get('kind')=='redline' else await Runtime(self.config(u,w)).messages(t)
                     receipt=await self.artifacts.save(u,t,w,payload,self.runtime(u,w),native=native)
                 except (ValueError,HTTPException) as exc:
                     receipt={'saved':False,'error':redact(str(getattr(exc,'detail',exc)),self.secrets(u,w['id']))}
                 self.store.execute('INSERT INTO e2b_receipts(request_id,workspace_id,execution_id,hash,receipt) VALUES(?,?,?,?,?)',(rid,w['id'],e['id'],h,encoded(receipt)))
-                self.record(w['id'],'artifact.saved' if receipt.get('saved') else 'artifact.failed',receipt,t['id'])
+                event=('redline.saved' if receipt.get('saved') else 'redline.read' if receipt.get('ok') else 'redline.failed') if payload.get('kind')=='redline' else ('artifact.saved' if receipt.get('saved') else 'artifact.failed')
+                # Do not mirror contract text, quotes or comments into event logs.
+                event_data={k:receipt[k] for k in ('saved','ok','version_id','artifact_id') if k in receipt} if payload.get('kind')=='redline' else receipt
+                self.record(w['id'],event,event_data,t['id'])
             await sbx.files.write('/workspace/exchange/'+rid+'.receipt.json',encoded(receipt))
             self.store.execute('UPDATE e2b_receipts SET delivered=1 WHERE request_id=?',(rid,))
             await sbx.files.remove(entry.path)
@@ -690,7 +847,7 @@ class E2B:
                 try:
                     u=self.owner(wid)
                     threads=self.store.all('SELECT * FROM threads WHERE workspace_id=?',(wid,))
-                    await asyncio.gather(*(self.collect_thread(u,t) for t in threads if not t['session_id'].startswith('pending_')))
+                    await self.refresh_threads(u, threads)
                     async with self.manager.lock('e2b-'+wid):
                         if self.handles.get(wid) is not sbx:continue
                         w=self.store.one('SELECT * FROM workspaces WHERE id=?',(wid,));b=self.binding(wid)
@@ -818,7 +975,7 @@ class E2BRuntime(Runtime):
 
     async def models(self):
         _,native,_=self.e2b.catalog(self.u)
-        return {'default':native.get('model'),'models':[{'id':pid+'/'+mid,'providerID':pid,'modelID':mid,'label':m.get('name',mid)} for pid,p in native.get('provider',{}).items() for mid,m in p.get('models',{}).items()]}
+        return {'default':native.get('model'),'models':[{'id':pid+'/'+mid,'providerID':pid,'providerLabel':p.get('name') or pid,'modelID':mid,'label':m.get('name',mid)} for pid,p in native.get('provider',{}).items() for mid,m in p.get('models',{}).items()]}
 
     async def skills(self,tid):
         row=self.e2b.skill_sync.row(self.w['id']) if self.w else None
@@ -828,7 +985,7 @@ class E2BRuntime(Runtime):
     async def refresh_skills(self,tid,directory):return await self.skills(tid)
 
     async def call(self,method,path,*,tid=None,**kwargs):
-        # GETs used by UI and traces are satisfied from the last persisted state.
+        # Active sessions read the live projection; cold sessions read saved history.
         if path.startswith('/session/pending_') and method!='GET':return None
         if tid:
             if method=='GET':
@@ -878,6 +1035,7 @@ class E2BRuntime(Runtime):
         return result
 
     async def messages(self,t):return (await asyncio.to_thread(self.e2b.history,t['id']))[0]
+    async def last_assistant(self,t):return await asyncio.to_thread(self.e2b.last_assistant,t['id'])
     async def status(self,t):return self.e2b.snapshot(t['id']).get('status',{'type':'idle'})
     async def permissions(self,tid,documents,mode='auto'):
         if mode=='full':return [{'permission':'*','pattern':'*','action':'allow'}]
@@ -895,16 +1053,28 @@ class E2BRuntime(Runtime):
         return rules
 
     async def events(self,t):
+        changed=asyncio.Event()
+        listener=(asyncio.get_running_loop(),changed)
+        self.e2b.history_listeners[t['id']].add(listener)
+        try:
+            async for event in self.live_events(t,changed):yield event
+        finally:self.e2b.history_listeners[t['id']].discard(listener)
+
+    async def live_events(self,t,changed):
         seen={};pending={'question':set(),'permission':set()};synced=object()
         while True:
+            changed.clear()
             current=self.e2b.store.one('SELECT * FROM threads WHERE id=?',(t['id'],))
             if not current:return
             t.update(current)
-            row=self.e2b.store.one('SELECT synced FROM e2b_history WHERE thread_id=?',(t['id'],))
-            stamp=row['synced'] if row else None
+            if t['id'] in self.e2b.live_history:stamp=('live',self.e2b.event_revisions.get(t['id'],0))
+            else:
+                row=self.e2b.store.one('SELECT synced FROM e2b_history WHERE thread_id=?',(t['id'],))
+                stamp=row['synced'] if row else None
             if synced==stamp:
                 yield {'type':'workbench.heartbeat'}
-                await asyncio.sleep(.25)
+                try:await asyncio.wait_for(changed.wait(),1)
+                except asyncio.TimeoutError:pass
                 continue
             synced=stamp
             messages,snap=await asyncio.to_thread(self.e2b.history,t['id'])
@@ -938,4 +1108,7 @@ class E2BRuntime(Runtime):
                     yield {'type':kind,'properties':{'sessionID':t['session_id'],field:value}}
             # Keep the transport alive without announcing an unchanged UI state.
             yield {'type':'workbench.heartbeat'}
-            await asyncio.sleep(.25)
+            # Coalesce a burst into a frame, without waiting for a quiet stream.
+            await asyncio.sleep(.016)
+            try:await asyncio.wait_for(changed.wait(),1)
+            except asyncio.TimeoutError:pass

@@ -1,5 +1,6 @@
 import {t as tr,ui} from './i18n.js';
 import {getLanguage} from './i18n.js';
+import {PROVIDER_PRESETS,EXTRA_PRESETS,parseExtraBody} from './provider-presets.js';
 import {api} from './api.js';
 import {esc} from './markdown.js';
 import {addDiscoveredModel,waitForOperation} from './provider-utils.js';
@@ -10,7 +11,7 @@ export async function renderAdmin(host,{mode,identity,notice,dirty,leave}){
  const input=(label,name,value='',extra='')=>`<label>${label}<input name="${name}" value="${esc(value??'')}" ${extra}></label>`;
  const admin=mode==='providers'||identity.role==='admin';let items=[],selected=null,currentModels=[],pending=false,catalog=[];
  function managementButtons(){
-  for(const button of host.querySelectorAll('[data-save-provider],[data-save-member],[data-apply-models],[data-retry-member]')){
+  for(const button of host.querySelectorAll('[data-save-provider],[data-delete-provider],[data-save-member],[data-apply-models],[data-retry-member]')){
    button.dataset.idleLabel ||= button.textContent;button.disabled=pending;
    button.textContent=pending?(mode==='providers'?tr('正在验证并应用…'):tr('正在处理…')):button.dataset.idleLabel;
   }
@@ -52,21 +53,35 @@ export async function renderAdmin(host,{mode,identity,notice,dirty,leave}){
   $('#memberForm button[type=submit]').setAttribute('data-save-member','');managementButtons();
   $('#memberForm').onsubmit=run(async e=>{e.preventDefault();if(pending)return;pending=true;managementButtons();try{const d=Object.fromEntries(new FormData(e.target));const result=await api('/api/admin/members'+(item?'/'+item.id:''),{method:item?'PUT':'POST',body:{username:d.username,password:d.password,role:d.role,active:d.active==='on',revision:item?.revision}});dirty(false);await loadList();memberEditor(result.member);if(result.existing)notice(tr('该账号已经存在，未重复创建。'));else await operation(result);}finally{pending=false;managementButtons();}});
  }
- function providerEditor(item){
+ function presetPicker(){
+  selected=null;list();
+  $('#adminEditor').innerHTML=ui`<h3>新增接入 — 选择厂商预设</h3><p class="settings-note">选择厂商后自动填写接口协议、服务地址和模型示例，也可以自定义接入。</p><div class="provider-presets">${PROVIDER_PRESETS.map(p=>`<button type="button" data-preset="${p.id}"><b>${esc(p.label)}</b><small>${esc(p.exampleModels[0]||tr('自定义'))}</small></button>`).join('')}</div>`;
+ }
+ function providerEditor(item,preset=null){
   if(item?.id==='trial'){selected=item;list();$('#adminEditor').innerHTML=tr('<h3>平台试用模型</h3><p>由平台提供，只能在已计入额度的任务中调用。额度用完后，可以添加自己的模型服务。</p><span class="settings-tag">公开只读配置</span>');return;}
 
   selected=item;catalog=[];currentModels=structuredClone(item?.models||[{id:'',label:'',context:128000,output:8192,enabled:true}]);list();
-  $('#adminEditor').innerHTML=ui`<form id="providerForm" class="settings-form"><div class="settings-editor-head"><h3>${item?tr('模型接入'):tr('添加供应商')}</h3>${item&&admin?`<span class="settings-tag">v${item.revision}</span>`:''}</div>${admin?ui`<fieldset>${!item?tr('<label>接入预设<select id="providerPreset"><option value="compatible">OpenAI 兼容</option><option value="deepseek">DeepSeek</option><option value="glm">智谱 GLM</option></select></label>'):''}${input(tr('供应商名称'),'label',item?.label,'required maxlength="100"')}${input(tr('服务地址'),'base_url',item?.base_url,'required type="url" placeholder="https://api.example.com/v1"')}<label>API 密钥<input name="key" type="password" autocomplete="new-password" placeholder="${item?.key_configured?tr('已配置，留空保留现有密钥'):tr('填写 API Key')}" maxlength="10000"></label>${item?.key_configured?tr('<label class="settings-check"><input name="clear_key" type="checkbox">清除密钥并停用此供应商</label>'):''}<details><summary>高级选项</summary>${input(tr('供应商标识'),'id',item?.id||'provider-'+Math.random().toString(16).slice(2,8),'required pattern="[a-z0-9]+(-[a-z0-9]+)*" maxlength="48" '+(item?'readonly':tr('placeholder="例如 company-models"')))}<label class="settings-check"><input name="enabled" type="checkbox" ${!item||item.enabled?'checked':''}>启用此供应商</label></details></fieldset>`:`<p>${esc(item?.label)}</p>`}<div class="settings-reference-head"><b>模型</b>${admin?tr('<div class="provider-model-actions"><button type="button" data-fetch-models>获取模型列表</button><button type="button" data-add-model>＋ 手动添加</button></div>'):''}</div><div id="modelCatalogStatus" class="provider-result" role="status"></div><div id="modelCatalog" hidden></div><div id="providerModels"></div>${admin?tr('<div class="settings-form-actions"><button type="submit" class="primary" data-save-provider>保存并应用</button></div><p class="settings-note">连接测试会在没有合同材料的临时环境中进行一次真实调用。运行中的任务结束后，新配置才会生效。</p>'):''}</form>`;
+  $('#adminEditor').innerHTML=ui`<form id="providerForm" class="settings-form"><div class="settings-editor-head"><h3>${item?tr('模型接入'):tr('添加供应商')}</h3>${item&&admin?`<span class="settings-tag">v${item.revision}</span>`:''}</div>${admin?ui`<fieldset>${input(tr('供应商名称'),'label',item?.label,'required maxlength="100"')}<label>接口协议<select name="protocol"><option value="openai" ${item?.protocol!=='anthropic'?'selected':''}>OpenAI 兼容（绝大多数厂商）</option><option value="anthropic" ${item?.protocol==='anthropic'?'selected':''}>Anthropic 原生</option></select></label>${input(tr('服务地址'),'base_url',item?.base_url,'required type="url" placeholder="https://api.example.com/v1"')}<label>API 密钥<input name="key" type="password" autocomplete="new-password" placeholder="${item?.key_configured?tr('已配置，留空保留现有密钥'):tr('填写 API Key')}" maxlength="10000"><button type="button" data-show-key aria-pressed="false">显示密钥</button></label>${item?.key_configured?tr('<label class="settings-check"><input name="clear_key" type="checkbox">清除密钥并停用此供应商</label>'):''}<details><summary>高级选项</summary>${input(tr('供应商标识'),'id',item?.id||'provider-'+Math.random().toString(16).slice(2,8),'required pattern="[a-z0-9]+(-[a-z0-9]+)*" maxlength="48" '+(item?'readonly':tr('placeholder="例如 company-models"')))}<label class="settings-check"><input name="enabled" type="checkbox" ${!item||item.enabled?'checked':''}>启用此供应商</label></details></fieldset>`:`<p>${esc(item?.label)}</p>`}<div class="settings-reference-head"><b>模型</b>${admin?tr('<div class="provider-model-actions"><button type="button" data-fetch-models>获取模型列表</button><button type="button" data-add-model>＋ 手动添加</button></div>'):''}</div><div id="modelCatalogStatus" class="provider-result" role="status"></div><div id="modelCatalog" hidden></div>${preset?.exampleModels.length?`<div class="provider-chips">${preset.exampleModels.map(m=>`<button type="button" data-example-model="${esc(m)}">${esc(m)}</button>`).join('')}</div>`:''}<div id="providerModels"></div><label>额外请求参数（JSON）<textarea name="extra_body" rows="5" spellcheck="false" placeholder='{"enable_thinking": false}'>${esc(item?.extra_body&&Object.keys(item.extra_body).length?JSON.stringify(item.extra_body,null,2):'')}</textarea></label><div id="extraBodyError" class="provider-result is-error" role="status"></div><div class="provider-chips">${EXTRA_PRESETS.map(([label],i)=>`<button type="button" data-extra-preset="${i}">${esc(tr(label))}</button>`).join('')}</div><p class="settings-note">参数合并到该供应商所有模型的请求体。不能覆盖消息、模型选择或工具定义。思考预算应小于输出上限。</p>${preset?.note?`<p class="settings-note">${esc(preset.note)}</p>`:''}${admin?tr('<div class="settings-form-actions"><button type="submit" class="primary" data-save-provider>保存并应用</button><button type="button" data-delete-provider class="settings-danger">删除供应商</button></div><p class="settings-note">连接测试会在没有合同材料的临时环境中进行一次真实调用。运行中的任务结束后，新配置才会生效。</p>'):''}</form>`;
   modelForms();managementButtons();
-  if($('#providerPreset'))$('#providerPreset').onchange=e=>{const f=$('#providerForm'),v=e.target.value;const values=v==='deepseek'?{id:'deepseek',label:'DeepSeek',url:'https://api.deepseek.com/v1',model:'deepseek-chat'}:v==='glm'?{id:'glm',label:tr('智谱 GLM'),url:'https://open.bigmodel.cn/api/paas/v4',model:'glm-5.3'}:{id:'provider-'+Math.random().toString(16).slice(2,8),label:'',url:'',model:''};f.elements.id.value=values.id;f.elements.label.value=values.label;f.elements.base_url.value=values.url;currentModels=[{id:values.model,label:values.model,context:128000,output:8192,enabled:true}];modelForms();dirty(true);};
+  $('[data-delete-provider]').hidden=!item;
+  if(preset){
+   const f=$('#providerForm');let id=preset.id==='custom'?'provider-'+Math.random().toString(16).slice(2,8):'custom-'+preset.id;
+   if(items.some(p=>p.id===id))id+='-'+Math.random().toString(16).slice(2,8);
+   f.elements.id.value=id;f.elements.label.value=preset.id==='custom'?'':preset.label;
+   f.elements.base_url.value=preset.baseUrl;f.elements.protocol.value=preset.kind;
+   f.elements.extra_body.value=preset.extraBody||'';
+   currentModels=[{id:preset.exampleModels[0]||'',label:preset.exampleModels[0]||'',context:128000,output:16384,enabled:true}];modelForms();dirty(true);
+  }
+  $('#providerForm').elements.extra_body.oninput=validateExtra;
   $('#providerForm').onsubmit=run(async e=>{
-   e.preventDefault();if(pending)return;pending=true;managementButtons();
-   const form=e.target,data=providerBody(),before=JSON.stringify(data);
+   e.preventDefault();if(pending||!validateExtra())return;
+   const form=e.target,data=providerBody(),before=JSON.stringify(data);pending=true;managementButtons();
    try{
     const result=await api('/api/providers',{method:'POST',body:data});
     if(form.isConnected){
      const unchanged=JSON.stringify(providerBody())===before;
      selected=result.provider;
+     $('[data-delete-provider]').hidden=false;
      const tag=form.querySelector('.settings-editor-head .settings-tag');if(tag)tag.textContent='v'+selected.revision;
      if(form.elements.key.value===data.key)form.elements.key.value='';
      form.elements.key.placeholder=selected.key_configured?tr('已配置，留空保留现有密钥'):tr('填写 API Key');
@@ -77,12 +92,17 @@ export async function renderAdmin(host,{mode,identity,notice,dirty,leave}){
    }finally{pending=false;managementButtons();}
   });
  }
+ function validateExtra(){
+  const input=$('#providerForm').elements.extra_body;
+  try{parseExtraBody(input.value);input.setCustomValidity('');resultText($('#extraBodyError'),'');return true;}
+  catch(e){input.setCustomValidity(tr('额外请求参数必须是合法 JSON 对象，且不能覆盖消息、模型或工具定义'));resultText($('#extraBodyError'),input.validationMessage,true);return false;}
+ }
  function modelForms(){
   $('#providerModels').innerHTML=currentModels.map((m,i)=>ui`<fieldset class="provider-model" data-model-index="${i}" ${!admin?'disabled':''}><div class="settings-fields">${input(tr('模型 ID'),'model_id',m.id,'required maxlength="180"')}${input(tr('显示名称'),'model_label',m.label,'required maxlength="100"')}</div><details class="provider-model-limits"><summary>高级参数</summary><div class="settings-fields">${input(tr('上下文上限'),'model_context',m.context,'type="number" required min="1" max="10000000"')}${input(tr('输出上限'),'model_output',m.output,'type="number" required min="1" max="10000000"')}</div></details><div class="provider-model-footer"><label class="settings-check"><input type="checkbox" name="model_enabled" ${m.enabled?'checked':''}>启用模型</label>${admin?ui`<div class="provider-model-actions"><button type="button" data-test-model="${i}">测试连接</button><button type="button" data-remove-model="${i}">移除</button></div>`:''}</div><div data-test-result class="provider-result" role="status"></div></fieldset>`).join('');
  }
  function connectionBody(){
   const d=Object.fromEntries(new FormData($('#providerForm')));
-  return {id:d.id,label:d.label||d.id,base_url:d.base_url,key:d.key||undefined,clear_key:d.clear_key==='on'};
+  return {protocol:d.protocol,extra_body:parseExtraBody(d.extra_body),id:d.id,label:d.label||d.id,base_url:d.base_url,key:d.key||undefined,clear_key:d.clear_key==='on'};
  }
  function resultText(slot,text,error=false){slot.textContent=text;slot.classList.toggle('is-error',error);}
  function renderCatalog(){
@@ -108,7 +128,7 @@ export async function renderAdmin(host,{mode,identity,notice,dirty,leave}){
   finally{button.disabled=false;button.textContent=tr('获取模型列表');}
  }
  async function testModel(button){
-  if(button.disabled)return;
+  if(button.disabled||!validateExtra())return;
   const form=$('#providerForm'),row=button.closest('[data-model-index]');
   if(!form.elements.base_url.reportValidity()||!row.querySelector('[name=model_id]').reportValidity())return;
   collectModels();const model=currentModels[Number(button.dataset.testModel)],slot=row.querySelector('[data-test-result]');
@@ -128,17 +148,27 @@ export async function renderAdmin(host,{mode,identity,notice,dirty,leave}){
  function collectModels(){
   currentModels=[...host.querySelectorAll('[data-model-index]')].map(f=>{const get=n=>f.querySelector(`[name="${n}"]`);return {...currentModels[Number(f.dataset.modelIndex)],id:get('model_id').value,label:get('model_label').value,context:Number(get('model_context').value),output:Number(get('model_output').value),enabled:get('model_enabled').checked};});
  }
- function providerBody(){collectModels();const d=Object.fromEntries(new FormData($('#providerForm')));return {id:d.id,label:d.label,base_url:d.base_url,key:d.key||undefined,clear_key:d.clear_key==='on',enabled:d.enabled==='on',revision:selected?.revision||0,models:currentModels};}
+ function providerBody(){collectModels();const d=Object.fromEntries(new FormData($('#providerForm')));return {protocol:d.protocol,extra_body:parseExtraBody(d.extra_body),id:d.id,label:d.label,base_url:d.base_url,key:d.key||undefined,clear_key:d.clear_key==='on',enabled:d.enabled==='on',revision:selected?.revision||0,models:currentModels};}
  frame(mode==='members'?tr('成员管理'):tr('模型与服务'),mode==='members'?tr('管理账号、角色与独立运行环境。'):tr('配置自己的模型服务、API 密钥和可用模型，仅对本人账号生效。'),admin?`<button class="primary" data-admin-new>${mode==='members'?tr('创建成员'):tr('添加供应商')}</button>`:'');
  const edited=e=>{
   if(['adminSearch','modelFilter'].includes(e.target.id))return;
   dirty(true);const form=$('#providerForm');if(form){form.dataset.editRevision=String(Number(form.dataset.editRevision||0)+1);for(const slot of form.querySelectorAll('[data-test-result]'))slot.textContent='';}
-  if(['base_url','key','clear_key','id'].includes(e.target.name)&&$('#modelCatalog')){$('#modelCatalog').hidden=true;resultText($('#modelCatalogStatus'),'');}
+  if(['base_url','key','clear_key','id','protocol'].includes(e.target.name)&&$('#modelCatalog')){$('#modelCatalog').hidden=true;resultText($('#modelCatalogStatus'),'');}
  };
  host.addEventListener('input',edited);host.addEventListener('change',edited);
  host.addEventListener('click',run(async e=>{const b=e.target.closest('button');if(!b)return;
   if(b.dataset.adminItem&&leave()){dirty(false);(mode==='members'?memberEditor:providerEditor)(items.find(x=>x.id===b.dataset.adminItem));}
-  if(b.hasAttribute('data-admin-new')&&leave()){dirty(false);(mode==='members'?memberEditor:providerEditor)(null);}
+  if(b.hasAttribute('data-admin-new')&&leave()){dirty(false);if(mode==='members')memberEditor(null);else presetPicker();}
+  if(b.dataset.preset&&leave())providerEditor(null,PROVIDER_PRESETS.find(p=>p.id===b.dataset.preset));
+  if(b.hasAttribute('data-show-key')){const input=$('#providerForm').elements.key;input.type=input.type==='password'?'text':'password';b.textContent=tr(input.type==='password'?'显示密钥':'隐藏密钥');b.setAttribute('aria-pressed',String(input.type==='text'));}
+  if(b.dataset.extraPreset!==undefined){$('#providerForm').elements.extra_body.value=JSON.stringify(EXTRA_PRESETS[Number(b.dataset.extraPreset)][1],null,2);validateExtra();edited({target:$('#providerForm').elements.extra_body});}
+  if(b.dataset.exampleModel){collectModels();currentModels=addDiscoveredModel(currentModels,b.dataset.exampleModel);modelForms();dirty(true);}
+  if(b.hasAttribute('data-delete-provider')&&selected&&!pending){
+   if(!confirm(ui`删除“${selected.label}”及其模型配置？历史任务和文件仍保留，运行中的任务结束后生效。`))return;
+   pending=true;managementButtons();
+   try{const result=await api(`/api/providers/${encodeURIComponent(selected.id)}?revision=${selected.revision}`,{method:'DELETE'});dirty(false);await loadList();presetPicker();notice(tr('供应商已删除。'));await operation(result);}
+   finally{pending=false;managementButtons();}
+  }
   if(b.hasAttribute('data-retry-member'))await operation(await api(`/api/admin/members/${selected.id}/retry`,{method:'POST',body:{}}));
   if(b.hasAttribute('data-reset-password')){if(!confirm(ui`重置 ${selected.username} 的密码并撤销其现有登录？`))return;await api(`/api/admin/members/${selected.id}/password`,{method:'POST',body:{password:$('#memberForm').elements.reset_password.value}});dirty(false);notice(tr('密码已重置，现有登录已撤销。'));}
   if(b.hasAttribute('data-add-model')){collectModels();if(currentModels.length>=40)throw Error(tr('每个供应商最多配置 40 个模型'));currentModels.push({id:'',label:'',context:128000,output:8192,enabled:true});modelForms();dirty(true);}
@@ -148,5 +178,5 @@ export async function renderAdmin(host,{mode,identity,notice,dirty,leave}){
   if(b.dataset.testModel!==undefined)await testModel(b);
   if(b.hasAttribute('data-apply-models')&&!pending){pending=true;managementButtons();try{await operation(await api('/api/providers/apply',{method:'POST',body:{}}));}finally{pending=false;managementButtons();}}
  }));
- await loadList();
+ await loadList();if(mode==='providers'){if(items.length)providerEditor(items[0]);else presetPicker();}
 }

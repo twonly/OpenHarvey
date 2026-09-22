@@ -14,5 +14,7 @@ jobs:
         with:
           node-version: '22'
       - run: pip install -r requirements.txt
+      - run: npm ci
+      - run: npm run build:redline
       - run: python -m unittest discover -s tests -q
-      - run: node --test tests/frontend.test.mjs
+      - run: npm test

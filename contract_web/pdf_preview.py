@@ -100,25 +100,33 @@ def read_pdf_link_outline(path, mapping):
 
 
 def render_pdf_page(path, page_number, width=960):
+    return render_pdf_pages(path, [page_number], width)[page_number]
+
+
+def render_pdf_pages(path, page_numbers, width=960):
+    """Open once for a small batch, closing every bitmap before the next page."""
     if not 320 <= width <= 2880:
         raise ValueError("预览宽度超出范围")
     with _PDFIUM_LOCK:
         with pypdfium2.PdfDocument(path) as pdf:
-            if not 1 <= page_number <= len(pdf):
+            if any(not 1 <= number <= len(pdf) for number in page_numbers):
                 raise IndexError("页码不存在")
-            page = pdf[page_number - 1]
-            try:
-                page_width, page_height = page.get_size()
-                scale = (width - 1e-6) / page_width
-                if width * math.ceil(page_height * scale) > 16_000_000:
-                    raise ValueError("页面尺寸过大，请下载原件查看")
-                bitmap = page.render(scale=scale)
+            result = {}
+            for page_number in page_numbers:
+                page = pdf[page_number - 1]
                 try:
-                    with bitmap.to_pil() as image:
-                        output = io.BytesIO()
-                        image.save(output, format="PNG")
-                        return output.getvalue()
+                    page_width, page_height = page.get_size()
+                    scale = (width - 1e-6) / page_width
+                    if width * math.ceil(page_height * scale) > 16_000_000:
+                        raise ValueError("页面尺寸过大，请下载原件查看")
+                    bitmap = page.render(scale=scale)
+                    try:
+                        with bitmap.to_pil() as image:
+                            output = io.BytesIO()
+                            image.save(output, format="PNG")
+                            result[page_number] = output.getvalue()
+                    finally:
+                        bitmap.close()
                 finally:
-                    bitmap.close()
-            finally:
-                page.close()
+                    page.close()
+            return result

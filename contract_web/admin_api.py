@@ -39,6 +39,13 @@ def register_admin(app,settings,models,manager,user):
         saved=models.save(u,body)
         return {**saved,**manager.operation(u,'models.apply',str(saved['revision']),lambda:app.state.accounts.operation(u,lambda:manager.apply_personal(u,saved['revision'])))}
 
+    @app.delete('/api/providers/{pid}')
+    async def delete_provider(pid:str,revision:int,request:Request):
+        u=model_writer(request)
+        if pid=='trial':raise HTTPException(403,'平台试用模型为只读配置')
+        saved=models.delete(u,pid,revision)
+        return {**saved,**manager.operation(u,'models.apply',str(saved['revision']),lambda:app.state.accounts.operation(u,lambda:manager.apply_personal(u,saved['revision'])))}
+
     @app.post('/api/providers/test')
     async def test_provider(request:Request):
         u=model_writer(request);body=await request.json()

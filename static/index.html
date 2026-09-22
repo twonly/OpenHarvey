@@ -6,12 +6,15 @@
 <title>OpenHarvey</title>
 <link rel="icon" href="/static/brand/openharvey.svg">
 <link rel="stylesheet" href="/static/workbench.css">
-<link rel="stylesheet" href="/static/app.css?v=20260914-progressive-1">
+<link rel="stylesheet" href="/static/memory.css">
+<link rel="stylesheet" href="/static/vendor/redline-editor.css">
+<link rel="stylesheet" href="/static/app.css?v=20260922-review">
 <link rel="stylesheet" href="/static/risk-ui.css?v=20260911-10">
-<link rel="stylesheet" href="/static/agent-ui.css?v=20260915-runtime-1">
-<link rel="stylesheet" href="/static/settings-ui.css?v=20260914-settings-1">
-<link rel="stylesheet" href="/static/account-ui.css?v=20260914-loading-all">
+<link rel="stylesheet" href="/static/agent-ui.css?v=20260921-tasks">
+<link rel="stylesheet" href="/static/settings-ui.css?v=20260916-provider-config">
+<link rel="stylesheet" href="/static/account-ui.css?v=20260921-tasks">
 <link rel="stylesheet" href="/static/workspace-controls.css?v=20260913-5">
+<link rel="stylesheet" href="/static/redline.css">
 <script defer src="/static/site-telemetry.js?v=20260914-1"></script><link rel="stylesheet" href="/static/i18n.css?v=20260914-1"><script type="module" src="/static/language-ui.js"></script></head>
 <body data-auth="loading">
 <div id="authLoading" class="auth-loading" role="status"><p id="authLoadingText" class="loading-status" aria-busy="true"><span class="loading-spinner" aria-hidden="true"></span><span data-no-i18n><span data-initial-locale="zh-CN">正在打开工作台…</span><span data-initial-locale="en">Opening workspace…</span></span></p><button id="authRetry" hidden>重新连接</button></div>
@@ -67,7 +70,7 @@
       <section id="docPane">
         <div id="documentToolbar">
           <div class="document-picker"><span id="documentTitle">选择文档</span><select id="documentSelect" aria-label="选择当前对话材料" hidden></select></div>
-          <div class="source-mode" role="group" aria-label="文档显示方式"><button id="viewOriginal" aria-pressed="true">原件</button><button id="viewText" aria-pressed="false">文本</button></div>
+          <div class="source-mode" role="group" aria-label="文档显示方式"><button id="viewOriginal" aria-pressed="true">原件</button><button id="viewRedline" hidden>审改</button><button id="viewText" aria-pressed="false">文本</button></div>
           <div class="document-actions">
             <button id="sourceOutlineToggle" type="button" aria-expanded="false" aria-controls="sourceOutline" disabled>☷ 目录</button>
             <button id="sourceSearchToggle" type="button" aria-expanded="false" aria-controls="sourceTools" title="搜索当前文档（⌘ / Ctrl + F）" disabled>搜索</button>
@@ -80,6 +83,7 @@
           <div class="source-search-field"><input id="sourceSearch" type="search" placeholder="搜索当前文档" aria-label="搜索当前文档" maxlength="200" autocomplete="off" disabled><button id="sourceSearchClear" type="button" aria-label="清除文档搜索" title="清除搜索" hidden>×</button></div>
           <span id="sourceSearchCount" role="status" aria-live="polite"></span><button id="sourceSearchPrev" type="button" aria-label="上一处匹配" title="上一处（Shift + Enter）" disabled>↑</button><button id="sourceSearchNext" type="button" aria-label="下一处匹配" title="下一处（Enter）" disabled>↓</button><button id="sourceSearchClose" type="button" aria-label="收起文档搜索" title="收起搜索">×</button>
         </div>
+<div id="redlineHost" hidden></div>
 <div id="sourceNavigationStatus" role="status" hidden></div>
       <div id="sourceReader"><nav id="sourceOutline" aria-label="文档目录" hidden><div class="outline-title"><b>文档目录</b><button id="sourceOutlineClose" type="button" aria-label="收起文档目录">×</button></div><div id="sourceOutlineBody"></div></nav><div id="sourceContent" tabindex="0" aria-label="合同原文"><p class="placeholder">上传合同后，在此阅读原文。</p></div></div></section>
       <div id="contextSplit" role="separator" tabindex="0" aria-label="调整原文和产出物大小" aria-orientation="horizontal"></div>
@@ -103,6 +107,6 @@
 <dialog id="deleteThreadDialog"><form method="dialog"><h3>删除这段对话？</h3><p>对话将移入“最近删除”，可随时恢复。附件、产出物和执行记录会保留。</p><div class="dialog-actions"><button value="cancel">取消</button><button value="delete" class="confirm-delete">移入最近删除</button></div></form></dialog>
 <input type="file" id="attachmentInput" accept=".docx,.pdf,.md,.txt" hidden>
 <div id="sourceSelectionToolbar" hidden><button id="addSourceQuote">引用原文到对话 ↵</button></div>
-<script type="module" src="/static/app.js?v=20260915-runtime-1"></script>
+<script type="module" src="/static/app.js?v=20260922-review"></script>
 </body>
 </html>

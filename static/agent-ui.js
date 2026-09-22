@@ -4,13 +4,15 @@ import {pendingRequest} from './message-queue.js?v=20260912-21';
 // Beautiful UI primitives, adapted from React to native HTML and OpenCode data.
 // MIT (c) 2026 Shane Levine; see vendor/beautiful-ui/LICENSE and THIRD_PARTY.md.
 import {esc} from './markdown.js';
+import {memoryReceiptHTML} from './memory-ui.js';
 import {isCompaction} from './events.js';
 
 const paths={check:'M20 6L9 17l-5-5',read:'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z M14 2v6h6',write:'M17 3a2.8 2.8 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5z',bash:'M4 17l6-5-6-5M12 19h8',skill:'M12 2l2.4 7.2L22 12l-7.6 2.8L12 22l-2.4-7.2L2 12l7.6-2.8z',search:'M21 21l-5-5 M18 10a8 8 0 1 1-16 0a8 8 0 0 1 16 0',chevron:'M6 9l6 6 6-6',close:'M18 6L6 18M6 6l12 12',shield:'M12 3l8 3v6c0 5-8 9-8 9s-8-4-8-9V6z'};
 export function icon(name){return `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${paths[name]||paths.read}"/></svg>`;}
 export function ring(active=false,number=''){return `<span class="bui-ring"><svg width="24" height="24" viewBox="0 0 24 24" class="${active?'bui-spin':''}" aria-hidden="true"><circle cx="12" cy="12" r="11" fill="none" stroke="var(--line)" stroke-width="2"/>${active?'<circle cx="12" cy="12" r="11" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-dasharray="19.35 49.76"/>':''}</svg><span>${number}</span></span>`;}
-export const toolLabels=liveLabels({websearch:'搜索网络',webfetch:'读取网页',read:'读取原文',grep:'搜索材料',glob:'查找文件',skill:'加载 Skill',write:'写入文件',edit:'编辑文件',bash:'处理文件',todowrite:'更新任务清单',question:'等待答复'});
+export const toolLabels=liveLabels({memory:'个人记忆',websearch:'搜索网络',webfetch:'读取网页',read:'读取原文',grep:'搜索材料',glob:'查找文件',skill:'加载 Skill',write:'写入文件',edit:'编辑文件',bash:'处理文件',todowrite:'更新任务清单',question:'等待答复'});
 export function toolHTML(p,stopped,open){
+  if(p.tool==='memory'&&p.memory_action!=='list')return memoryReceiptHTML(p);
   const s=p.state||{},status=stopped&&['pending','running'].includes(s.status)?'interrupted':s.status;
   const label={pending:tr('等待'),running:tr('执行中'),completed:tr('完成'),error:tr('失败'),interrupted:tr('已中断')}[status]||status;
   const glyph={grep:'search',glob:'search',edit:'write',todowrite:'check',question:'skill'}[p.tool]||p.tool;
@@ -44,14 +46,26 @@ export function todosHTML(state,expanded){
   const todos=state.todos||[];if(!todos.length)return '';
   const done=todos.filter(t=>t.status==='completed').length;
   // OpenCode retains the previous list across prompts; busy does not make it current.
-  if(done===todos.length)return '';
-  const active=todos.some(t=>t.status==='in_progress')&&state.status?.type!=='idle';
-  return ui`<details class="bui-tasks" ${expanded??active?'open':''}><summary>${icon('check')}<b>任务清单</b><span>${done} / ${todos.length} 项</span><i class="bui-chevron">${icon('chevron')}</i></summary><ol>${todos.map((t,i)=>{
-    const status=t.status==='in_progress'&&state.status?.type==='idle'?'interrupted':t.status;
-    const label={completed:tr('已完成'),in_progress:tr('进行中'),pending:tr('待处理'),cancelled:tr('已取消'),interrupted:tr('已中断')}[status]||tr('待处理');
+  if(done===todos.length||state.dismissed_todos===todoSignature(state))return '';
+  const messages=state.messages||[],last=messages.at(-1)?.info;
+  const owner=latestTodoMessage(state),user=messages.findLast(m=>m.info?.role==='user');
+  if(owner&&user&&messages.indexOf(owner)<messages.indexOf(user))return '';
+  const idle=state.status?.type==='idle',waiting=state.questions?.length||state.permissions?.length;
+  // A normal final answer retires the progress view, without fabricating completed todos.
+  if(idle&&!waiting&&last?.role==='assistant'&&last.finish==='stop'&&last.time?.completed&&!last.error)return '';
+  const active=todos.some(t=>t.status==='in_progress')&&!idle&&!waiting;
+  const resume=idle&&!waiting&&!state.queue?.active&&!state.queue?.items?.length&&todos.some(t=>['in_progress','pending'].includes(t.status));
+  return ui`<div class="task-panel"><button type="button" class="tasks-dismiss" data-dismiss-todos aria-label="关闭此任务清单" title="关闭此任务清单">${icon('close')}</button><details class="bui-tasks" ${expanded??active?'open':''}><summary>${icon('check')}<b>任务清单</b><span>${done} / ${todos.length} 项</span><i class="bui-chevron">${icon('chevron')}</i></summary><ol>${todos.map((t,i)=>{
+    const status=t.status==='in_progress'?(waiting?'waiting':idle?'interrupted':'in_progress'):t.status;
+    const label={completed:tr('已完成'),in_progress:tr('进行中'),pending:tr('待处理'),cancelled:tr('已取消'),interrupted:tr('已中断'),waiting:state.questions?.length?tr('等待你的答复'):tr('等待你的许可')}[status]||tr('待处理');
     const badge=status==='completed'?`<span class="bui-badge">${icon('check')}</span>`:ring(status==='in_progress',i+1);
     return `<li data-status="${esc(status)}">${badge}<span class="task-copy">${esc(t.content)}</span><span class="task-status ${esc(status)}">${label}</span></li>`;
-  }).join('')}</ol></details>`;
+  }).join('')}</ol></details>${resume?ui`<div class="tasks-recovery"><span>本轮已停止，清单仍有未完成项。</span><button type="button" data-resume-todos>继续未完成任务</button></div>`:''}</div>`;
+}
+function latestTodoMessage(state){return (state.messages||[]).findLast(m=>m.parts?.some(p=>p.type==='tool'&&p.tool==='todowrite'&&p.state?.status==='completed'));}
+export function todoSignature(state){
+  const m=latestTodoMessage(state),p=m?.parts.findLast(p=>p.type==='tool'&&p.tool==='todowrite'&&p.state?.status==='completed');
+  return JSON.stringify([p?.callID||p?.id||m?.info?.id||null,state.todos||[]]);
 }
 export function requestsHTML(state){
   return (state.questions||[]).map(q=>ui`<form class="request-card bui-approval" data-question="${esc(q.id)}"><div class="approval-kicker">${icon('skill')}<span>需要你的补充</span></div>${q.questions.map((question,i)=>ui`<fieldset><legend>${esc(question.question)}</legend><div class="approval-options">${question.options.map(o=>`<label><input type="${question.multiple?'checkbox':'radio'}" name="q${i}" value="${esc(o.label)}"><span><b>${esc(o.label)}</b><small>${esc(o.description||'')}</small></span></label>`).join('')}</div><input type="text" name="free${i}" placeholder="也可以直接输入答复…" aria-label="${esc(question.question)}的补充答复"></fieldset>`).join('')}<footer><span>${q.questions.length} 个问题</span><button type="submit" class="approval-confirm">提交并继续 →</button></footer></form>`).join('')+

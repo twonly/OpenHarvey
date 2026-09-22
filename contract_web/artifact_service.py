@@ -17,9 +17,17 @@ class ArtifactService:
         self.documents_for, self.source_dir = documents_for, source_dir
 
     async def save(self, u, t, w, body, rt, *, native=None):
+        if body.get('kind') == 'redline':
+            return await self.redline.apply(u, t, {**body, 'agent': True})
+        if native is None:
+            native = await rt.messages(t)
+        # Validation, document conversion and disk/SQLite work must not occupy
+        # the HTTP event loop. Keep the existing caller's save lock and receipt.
+        return await run_in_threadpool(self._save, u, t, w, body, rt, native)
+
+    def _save(self, u, t, w, body, rt, native):
         docs = self.documents_for(u, t)
         maps = {d["id"]: json.loads((self.source_dir(u, d["id"])/"document.json").read_text()) for d in docs}
-        if native is None: native = await rt.messages(t)
         coverage = read_blocks(native, maps, {rt.source_path(d["id"]): d["id"] for d in docs})
         execution = self.risks.recorded(u, t)
         if execution:
@@ -49,7 +57,7 @@ class ArtifactService:
             (dest/"report.json").write_text(encoded)
             if fmt == "md":
                 export_maps = {d["id"]: {**maps[d["id"]], "filename": d["filename"]} for d in docs}
-                (dest/"report.docx").write_bytes(await run_in_threadpool(_md_to_docx_bytes, export_citations(body["content"], export_maps)))
+                (dest/"report.docx").write_bytes(_md_to_docx_bytes(export_citations(body["content"], export_maps)))
             self.store.execute("INSERT INTO artifacts VALUES(?,?,?,?,?,?,?,?)", (aid, w["id"], t["id"],
                           body["kind"], title, content_hash, body["source_hash"], time.time()))
             self.store.execute("UPDATE workspaces SET last_activity_at=? WHERE id=?", (time.time(), w["id"]))

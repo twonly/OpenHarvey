@@ -4,7 +4,7 @@ import io
 import json
 
 FORMATS = {"md": "text/markdown", "html": "text/html", "txt": "text/plain",
-           "json": "application/json", "csv": "text/csv", "svg": "image/svg+xml"}
+           "json": "application/json", "csv": "text/csv", "svg": "image/svg+xml", "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document"}
 PREVIEW_CSP = ("default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; "
                "img-src data:; font-src data:; connect-src 'none'; frame-src 'none'; "
                "object-src 'none'; base-uri 'none'; form-action 'none'; sandbox allow-scripts")
@@ -12,7 +12,7 @@ PREVIEW_CSP = ("default-src 'none'; script-src 'unsafe-inline'; style-src 'unsaf
 
 def validate_format(body):
     fmt = body.get("format", "md")
-    if not isinstance(fmt, str) or fmt not in FORMATS:
+    if not isinstance(fmt, str) or fmt not in FORMATS or fmt == 'docx':
         raise ValueError("产出支持 Markdown、HTML、TXT、JSON、CSV、SVG")
     if body.get("kind") == "revision" and fmt != "md":
         raise ValueError("结构化修改稿请用 Markdown 保存；其他排版可另存为 document")

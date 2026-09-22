@@ -58,6 +58,12 @@ def register_settings(app, settings, user, runtime):
         settings.audit(u, 'password.change', u['id'])
         return {'ok': True, 'login_required': True}
 
+    @app.post('/api/settings/trial-notice/dismiss')
+    async def dismiss_trial_notice(request: Request):
+        u = user(request)
+        store.execute("UPDATE users SET preferences=json_set(preferences,'$.trial_notice_dismissed',json('true')),settings_revision=settings_revision+1 WHERE id=?", (u['id'],))
+        return {'trial_notice_dismissed': True}
+
     def skill_changed(result):
         sync=app.state.e2b.skill_sync
         sync.wakeup.set()
