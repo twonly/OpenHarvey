@@ -10,8 +10,10 @@ from contract_web.marketing import register_marketing
 
 ROOT = Path(__file__).resolve().parents[1]
 
-PUBLIC_PATHS = ['/', '/en'] + [p+'/'+s for s in ('security','open-source','harvey-alternative','features') for p in ('','/en')]
-WORKBENCH_PATHS = ['/labs','/connectors','/demo','/spaces','/guide','/login','/agent','/model','/config','/traces','/ops','/ops/:path*','/skills','/risks','/members','/organization','/health','/api/:path*','/auth/:path*','/orca/:path*','/trial-model/:path*','/static/:path*']
+PUBLIC_PATHS = ['/', '/en', '/guide'] + [p+'/'+s for s in ('security','open-source','harvey-alternative','features') for p in ('','/en')]
+WORKBENCH_PATHS = ['/labs','/connectors','/demo','/spaces','/login','/agent','/model','/config','/traces','/ops','/ops/:path*','/skills','/risks','/members','/organization','/health','/api/:path*','/auth/:path*','/orca/:path*','/trial-model/:path*','/static/:path*']
+
+GUIDE_ASSETS = ('product.css','showcase.css','i18n.css','product-guide.js','i18n.js','language-ui.js','locales/en.js','site-telemetry.js')
 
 def hosting_config(workbench_origin):
     origin=workbench_origin.rstrip('/')
@@ -48,16 +50,26 @@ def main():
     paths=PUBLIC_PATHS+['/robots.txt','/sitemap.xml','/llms.txt']
     with TestClient(app) as client:
         for url in paths:
-            response=client.get(url)
-            response.raise_for_status()
+            if url == '/guide':
+                body = (ROOT/'static/guide.html').read_text(encoding='utf-8')
+                for name in GUIDE_ASSETS:
+                    body = body.replace('/static/'+name, '/guide-assets/'+name)
+            else:
+                response=client.get(url)
+                response.raise_for_status()
+                body = response.text
             file=dest/('index.html' if url=='/' else url.lstrip('/')+('.html' if '.' not in url else ''))
             file.parent.mkdir(parents=True,exist_ok=True)
-            body=response.text
             file.write_text(body,encoding='utf-8')
     (dest/'static/brand').mkdir(parents=True)
     for name in ('site-telemetry.js','openharvey.css','showcase.css','brand/openharvey.svg','brand/openharvey-social.png','brand/github.svg','brand/google.svg'):
         if (ROOT/'static'/name).is_file():shutil.copy2(ROOT/'static'/name,dest/'static'/name)
     shutil.copytree(ROOT/'static/product',dest/'static/product')
+    # Keep documentation updates independent of the running workspace's assets.
+    for name in GUIDE_ASSETS:
+        target=dest/'guide-assets'/name
+        target.parent.mkdir(parents=True,exist_ok=True)
+        shutil.copy2(ROOT/'static'/name,target)
     (dest/'vercel.json').write_text(json.dumps(config,indent=2)+'\n')
     print(json.dumps({'destination':str(dest),'pages':len(paths)}))
 

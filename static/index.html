@@ -7,6 +7,7 @@
 <link rel="icon" href="/static/brand/openharvey.svg">
 <link rel="stylesheet" href="/static/workbench.css">
 <link rel="stylesheet" href="/static/memory.css?v=20260922-labs">
+<link rel="stylesheet" href="/static/materials.css">
 <link rel="stylesheet" href="/static/vendor/redline-editor.css">
 <link rel="stylesheet" href="/static/app.css?v=20260922-labs">
 <link rel="stylesheet" href="/static/risk-ui.css?v=20260911-10">
@@ -44,7 +45,7 @@
     <div class="rail-scroll">
       
       <section class="rail-section"><div class="rail-section-head"><select id="threadScope" aria-label="对话范围"><option value="active">当前对话</option><option value="archived">已归档</option><option value="deleted">最近删除</option></select><button id="newThread" aria-label="新建对话" disabled>＋</button></div><div id="threadList"></div></section>
-      <section class="rail-section"><div class="rail-section-head"><span>附件 <small id="attachmentCount">0</small></span><button id="railAttachButton" aria-label="上传当前对话附件" disabled>＋</button></div><p class="rail-caption">仅用于当前对话</p><div id="attachmentList"></div></section>
+      <section class="rail-section"><div class="rail-section-head"><span><span id="attachmentLabel">附件</span> <small id="attachmentCount">0</small></span><button id="materialsManage" class="materials-manage" hidden>管理</button><button id="railAttachButton" aria-label="上传当前对话附件" disabled>＋</button></div><p id="attachmentCaption" class="rail-caption">仅用于当前对话</p><div id="attachmentList"></div></section>
       <section class="rail-section"><div class="rail-section-head">产出物</div><div id="workspaceArtifacts"></div></section>
     </div>
   </aside>
@@ -59,6 +60,7 @@
         <div id="savedDrafts" class="saved-drafts" hidden></div>
         
         <div id="sourceQuoteTray"></div>
+        <button id="materialScope" class="materials-scope" type="button" hidden></button>
         <div class="composer-options"><div class="quick-actions" id="skillActions" aria-label="可用 Skills"></div><label class="risk-scheme-picker"><span>审查方案</span><select id="riskSchemeSelect" aria-label="本次审查方案" disabled></select></label><button id="riskSchemeRetry" type="button" hidden>重试方案</button></div>
         <div class="prompt-card"><div id="skillPicker" role="listbox" aria-label="选择 Skill" hidden></div><div id="selectedSkill" hidden></div><textarea id="input" aria-label="合同问题或任务指令" aria-controls="skillPicker" aria-expanded="false" rows="3" placeholder="询问条款、圈选原文提问，或输入 / 选择 Skill…" disabled></textarea>
           <div class="prompt-actions"><button id="attachButton" class="shell-toggle" disabled>＋ 附件</button><label class="model-picker"><span>模型</span><select id="modelSelect" aria-label="选择对话模型" title="用于下一条消息，选择仅为当前对话保存" disabled></select></label><button id="modelRetry" type="button" hidden>重试模型</button><label class="permission-picker"><select id="permissionMode" aria-label="执行权限模式" title="全权执行：当前合同空间的云端沙箱内自动执行工具操作；常规执行：额外命令需确认；谨慎执行：写入和命令需确认。选择会记入账号默认设置，新会话继承。" disabled><option value="full">全权执行</option><option value="auto">常规执行</option><option value="cautious">谨慎执行</option></select><span id="permissionLoading" class="permission-loading" role="status" aria-label="正在更新执行权限" hidden></span></label><button id="stopButton" type="button" title="取消当前任务，并暂停后续排队消息" hidden><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="5" y="5" width="14" height="14" rx="2"/></svg><span>取消任务</span></button><button id="sendBtn" type="button" aria-label="发送给 Agent" disabled><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></svg><span id="sendLabel" hidden>排队</span></button></div>

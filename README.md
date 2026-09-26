@@ -4,7 +4,7 @@
 
 Inspect source-linked findings, configure your own review playbooks and choose a self-hosting setup. [Explore the Harvey alternative guide](https://openharvey.com/en/harvey-alternative) for a practical workflow, deployment options and operating costs. OpenHarvey is an independent project, not affiliated with Harvey, and does not claim feature parity.
 
-[中文说明](README.zh-CN.md) · [Website](https://openharvey.com) · [English website](https://openharvey.com/en) · [Try the workspace](https://openharvey.com/demo) · [Deployment](docs/deployment.md)
+[中文说明](README.zh-CN.md) · [Website](https://openharvey.com) · [English website](https://openharvey.com/en) · [Try the workspace](https://openharvey.com/demo) · [Deployment](docs/deployment.md) · [User guide](https://openharvey.com/guide?lang=en#materials) · [Contract materials manual](docs/materials-labs.md)
 
 OpenHarvey connects source documents, conversations and saved deliverables. It is built around the structure of contract work: clauses, attachments, evidence, review playbooks and revisions.
 
@@ -19,6 +19,12 @@ OpenHarvey connects source documents, conversations and saved deliverables. It i
 
 The website and workspace interface support Chinese and English. Existing documents, examples and generated reports retain their original language. English-contract quality requires separate evaluation.
 
+
+## Contract materials in Labs
+
+Enable Contract materials under Settings → Labs to manage supporting files across conversations in the same workspace. Batch upload, search, remove and restore files while retaining historical citations. The option is personal and off by default; hosted availability depends on the deployed version.
+
+[User manual](docs/materials-labs.md) · [Online guide](https://openharvey.com/guide?lang=en#materials)
 
 ## What’s new: Memory and DOCX review
 

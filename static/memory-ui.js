@@ -70,6 +70,16 @@ export async function handleMemoryAction(event,{notice=()=>{},dirty=()=>{}}={}){
 export async function renderLabs(root,{notice,dirty,isCurrent=()=>true}){
   const [status,data,redline]=await Promise.all([api('/api/settings/labs'),api('/api/memories'),api('/api/settings/labs/redline')]);if(!isCurrent())return;
   root.innerHTML=`<div class="settings-heading"><div><h2>Labs</h2><p>${tr('尝试工作台的实验功能。')}</p></div></div><section class="memory-labs"><header><div><h3>${tr('个人记忆')}</h3><p>${tr('记住你的工作偏好，供后续对话使用。')}</p></div><label class="settings-check"><input type="checkbox" data-memory-toggle ${status.memory_enabled?'checked':''} ${!status.available?'disabled':''}>${tr('开启')}</label></header><p class="settings-note" role="status">${tr(!status.available?'当前账号暂不可开启个人记忆':status.effective?'已开启：助手可以主动保存长期偏好。':'已暂停使用和自动保存，已有记忆保留。')}</p>${status.requires_login?`<a href="/login">${tr('登录正式账号')}</a>`:''}<p class="settings-note">${tr('关闭或删除不移除旧聊天，正在生成的答复可能已使用记忆。')}</p><div class="memory-toolbar"><input type="search" data-memory-search placeholder="${tr('搜索记忆')}" aria-label="${tr('搜索记忆')}"><button type="button" data-memory-add>${tr('添加记忆')}</button></div><p class="settings-note">${data.used.toLocaleString()} / ${data.limit.toLocaleString()} ${tr('字符')}</p><div data-memory-list></div></section>${redlineLabsHTML(redline)}`;
+  root.querySelector('.settings-heading').insertAdjacentHTML('afterend',`<section class="memory-labs materials-labs"><header><div><h3>${tr('合同资料')}</h3><p>${tr('集中管理合同空间的资料，批量上传、查找和恢复，并由助手按任务取材。')}</p></div><label class="settings-check"><input type="checkbox" data-materials-toggle ${status.materials_enabled?'checked':''}>${tr('开启')}</label></header><p class="settings-note">${tr('默认关闭，仅对我的账号生效。关闭后恢复附件入口，已有资料与历史引用保留。')}</p><p class="settings-note" data-materials-status role="status">${tr(status.materials_enabled?'已开启合同资料':'未开启合同资料')}</p><p class="settings-note"><a href="/guide${getLanguage()==='en'?'?lang=en':''}#materials" target="_blank" rel="noopener">${tr('使用手册')} ↗</a></p></section>`);
+  root.querySelector('[data-materials-toggle]').onchange=async e=>{
+    const input=e.target;input.disabled=true;
+    try{
+      Object.assign(status,await api('/api/settings/labs',{method:'PATCH',body:{materials_enabled:input.checked,revision:status.revision}}));
+      root.querySelector('[data-materials-status]').textContent=tr(status.materials_enabled?'已开启合同资料':'未开启合同资料');
+      announceMemoryChange();
+    }catch(error){input.checked=status.materials_enabled;root.querySelector('[data-materials-status]').textContent=error.message;notice(error.message);}
+    finally{input.disabled=false;}
+  };
   root.querySelector('[data-redline-toggle]').onchange=async e=>{
     const button=e.target;button.disabled=true;
     try{await api('/api/settings/labs/redline',{method:'PATCH',body:{redline_enabled:button.checked,revision:redline.revision}});}

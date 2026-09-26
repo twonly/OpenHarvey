@@ -452,7 +452,7 @@ class E2B:
         removal='/opt/contract-runtime/library'
         if u.get('role')!='admin':removal+=' /opt/contract-runtime/skills/contract-change-risk'
         await sbx.commands.run('rm -rf '+removal)
-        docs=self.store.all('SELECT id,source_hash FROM documents WHERE workspace_id=? ORDER BY id',(wid,))
+        docs=self.store.all('SELECT id,source_hash FROM documents WHERE workspace_id=? AND removed_at IS NULL ORDER BY id',(wid,))
         artifacts=self.store.all('SELECT id,content_hash FROM artifacts WHERE workspace_id=? ORDER BY id',(wid,))
         signature=encoded([docs,artifacts])
         prior=self.file_indexes.get(wid)

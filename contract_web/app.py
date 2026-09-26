@@ -2,7 +2,7 @@ import asyncio
 import base64
 import logging
 from .session_policy import session_seconds
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, AsyncExitStack
 import re
 import hashlib
 import json
@@ -26,6 +26,7 @@ from .pdf_cache import PdfPageCache
 from .outline_jobs import OutlineJobs
 from .runtime import Runtime, RuntimeError, visible_event, visible_messages
 from .store import Store, digest
+from . import materials
 from .presentation import PublicView
 from .artifact_formats import FORMATS, PREVIEW_CSP, validate_format, files_for
 from .html_preview import render_preview
@@ -168,23 +169,21 @@ def create_app(data_dir=None, runtime_factory=Runtime, library=None):
             raise HTTPException(409, "此对话只读，请先恢复后再继续")
         return row
 
-    def documents_for(u, t):
-        w = store.one('SELECT backend FROM workspaces WHERE id=?',(t['workspace_id'],))
-        if w and w['backend']=='e2b':
-            return store.all('SELECT * FROM documents WHERE user_id=? AND workspace_id=?',(u['id'],t['workspace_id']))
-        return store.all("SELECT * FROM documents WHERE user_id=? AND workspace_id=? "
-                         "AND (thread_id IS NULL OR thread_id=?)", (u["id"], t["workspace_id"], t["id"]))
+    def documents_for(u, t, history=False):
+        return materials.documents(store, u, t, history)
 
     def document(u, docid, tid):
         if not tid:
             # Reading an owned primary source never requires a conversation or quota.
-            # Attachments still require their existing conversation access checks.
-            row = store.one("SELECT d.* FROM documents d JOIN workspaces w ON w.id=d.workspace_id WHERE d.id=? AND d.user_id=? AND w.user_id=? AND w.document_id=d.id AND w.deleted_at IS NULL", (docid, u["id"], u["id"]))
+            # Labs also permits owner-checked space material previews without a session.
+            row = store.one("SELECT d.*,w.document_id=d.id AS primary_source FROM documents d JOIN workspaces w ON w.id=d.workspace_id WHERE d.id=? AND d.user_id=? AND w.user_id=? AND w.deleted_at IS NULL", (docid, u["id"], u["id"]))
+            if row and not row['primary_source'] and not materials.enabled(store,u):
+                row = None
             if not row:
                 raise HTTPException(404, "原文不存在或不属于当前账号")
             return row
         t = thread(u, tid)
-        row = next((d for d in documents_for(u, t) if d["id"] == docid), None)
+        row = next((d for d in documents_for(u, t, history=True) if d["id"] == docid), None)
         if not row:
             raise HTTPException(404, "文档不属于当前对话")
         return row
@@ -195,7 +194,7 @@ def create_app(data_dir=None, runtime_factory=Runtime, library=None):
     def public_view(u, t, rt):
         locale = settings.preferences(u)['effective']['ui_language']
         labels = PublicView(locale=locale)
-        aliases = {rt.source_path(d["id"]): d["filename"] for d in documents_for(u, t)}
+        aliases = {rt.source_path(d["id"]): d["filename"] for d in documents_for(u, t, history=True)}
         manifest = store.user_root(u["id"]) / "threads" / t["id"] / ".skill-versions.json"
         if manifest.exists():
             for item in json.loads(manifest.read_text()):
@@ -217,7 +216,7 @@ def create_app(data_dir=None, runtime_factory=Runtime, library=None):
                    "execution_id": execution["id"] if execution else None,
                    "organization": {k: preferences["organization"]["settings"].get(k, "") for k in ("background", "guidance")},
                    "documents": [{**{k: d[k] for k in ("id", "filename", "source_hash")},
-                                  "primary": d["thread_id"] is None,
+                                  "primary": d["primary"],
                                   "path": rt.source_path(d["id"])} for d in docs],
                    "risk_library": str(wd / "risk-library.json") if rt.config.get("local") else rt.directory(t["id"])+"/risk-library.json",
                    "publish_script": rt.config.get("submit_script", rt.config["skill_root"] + "/scripts/publish.py"),
@@ -288,6 +287,12 @@ def create_app(data_dir=None, runtime_factory=Runtime, library=None):
             content.extend(chunk)
             if len(content) > (accounts.limits()["upload_mb"]*1024*1024 if u.get("account_kind")=="demo" else MAX_UPLOAD):
                 raise HTTPException(413, f"文件不能超过 {accounts.limits()['upload_mb'] if u.get('account_kind')=='demo' else 20} MB")
+        managed = tid is not None and materials.enabled(store,u)
+        if managed:
+            duplicate = store.one('SELECT * FROM documents WHERE user_id=? AND workspace_id=? AND source_hash=? AND removed_at IS NULL',
+                                  (u['id'], wid, hashlib.sha256(content).hexdigest()))
+            if duplicate:
+                return {**duplicate, 'reused': True}
         accounts.reserve_resource(u,"upload")
         docid = secrets.token_hex(6)
         dest = source_dir(u, docid)
@@ -297,8 +302,8 @@ def create_app(data_dir=None, runtime_factory=Runtime, library=None):
             path.write_bytes(content)
             mapped = await run_in_threadpool(prepare, path, docid, defer_outline=True)
             accounts.require_active(u)
-            store.execute("INSERT INTO documents VALUES(?,?,?,?,?,?,?)",
-                (docid, u["id"], wid, tid, filename, suffix, mapped["source_hash"]))
+            store.execute("INSERT INTO documents(id,user_id,workspace_id,thread_id,filename,suffix,source_hash,shared_at) VALUES(?,?,?,?,?,?,?,?)",
+                (docid, u["id"], wid, tid, filename, suffix, mapped["source_hash"], time.time() if managed else None))
             outlines.get(path, mapped)
             return {"id": docid, "filename": filename, "source_hash": mapped["source_hash"]}
         except Exception as exc:
@@ -349,6 +354,102 @@ def create_app(data_dir=None, runtime_factory=Runtime, library=None):
     register_trial_proxy(app,accounts)
     register_settings(app, settings, user, runtime)
     register_memory(app, memory, user)
+    def labs_status(u):
+        return {**memory.status(u), 'materials_enabled': materials.enabled(store,u)}
+
+    async def materials_idle(u, w):
+        threads = store.all('SELECT * FROM threads WHERE workspace_id=?', (w['id'],))
+        if store.one("SELECT 1 FROM queued_messages q JOIN threads t ON q.thread_id=t.id WHERE t.workspace_id=? AND q.status IN ('dispatching','submitted')", (w['id'],)):
+            raise HTTPException(409, '请等待合同空间内的任务完成后再修改资料或 Labs 设置')
+        for t in threads:
+            if (await runtime(u,t['id']).status(t))['type'] != 'idle':
+                raise HTTPException(409, '请等待合同空间内的任务完成后再修改资料或 Labs 设置')
+        return threads
+
+    @app.get('/api/settings/labs')
+    async def labs(request: Request):
+        return labs_status(user(request))
+
+    @app.patch('/api/settings/labs')
+    async def update_labs(request: Request):
+        u, body = user(request), await request.json()
+        if not isinstance(body,dict) or 'materials_enabled' not in body:
+            memory.set_enabled(u,body)
+            return labs_status(u)
+        if set(body) != {'materials_enabled','revision'} or type(body['materials_enabled']) is not bool or type(body['revision']) is not int:
+            raise HTTPException(422, '合同资料设置无效')
+        async with AsyncExitStack() as stack:
+            await stack.enter_async_context(manager.lock(u['id']))
+            spaces = store.all('SELECT * FROM workspaces WHERE user_id=? ORDER BY id', (u['id'],))
+            for w in spaces:
+                if w['backend']=='e2b':
+                    await stack.enter_async_context(manager.lock('queue-'+w['id']))
+                await materials_idle(u,w)
+            with store.connect() as db:
+                n=db.execute("UPDATE users SET preferences=json_set(preferences,'$.materials_enabled',json(?)),settings_revision=settings_revision+1 WHERE id=? AND settings_revision=?",
+                             (json.dumps(body['materials_enabled']),u['id'],body['revision'])).rowcount
+                if not n:
+                    raise HTTPException(409, '设置已更新，请重新载入后保存')
+                if body['materials_enabled']:
+                    db.execute('UPDATE documents SET shared_at=COALESCE(shared_at,?) WHERE user_id=?', (time.time(),u['id']))
+        return labs_status(u)
+
+    def materials_workspace(u,wid):
+        w=workspace(u,wid)
+        if not materials.enabled(store,u):
+            raise HTTPException(403, '请先在 Labs 开启合同资料')
+        if w.get('purging_at') or w.get('security_blocked'):
+            raise HTTPException(409, '此合同空间暂不可修改资料')
+        return w
+
+    async def sync_materials(u,w,threads):
+        for t in threads:
+            rt=runtime(u,t['id'])
+            docs=context_file(u,t,rt)
+            await rt.call('PATCH',f'/session/{t["session_id"]}',tid=t['id'],
+                          body={'permission':await rt.permissions(t['id'],docs,t['permission_mode'])})
+        if w['backend']=='e2b' and w['id'] in e2b.handles and threads:
+            await e2b.sync_files(u,threads[0])
+        store.execute('UPDATE workspaces SET last_activity_at=? WHERE id=?',(time.time(),w['id']))
+
+    @app.get('/api/workspaces/{wid}/documents')
+    async def list_materials(wid: str,request: Request):
+        u=user(request);w=materials_workspace(u,wid)
+        return {'documents':documents_for(u,{'workspace_id':wid,'id':None},history=True)}
+
+    @app.post('/api/workspaces/{wid}/attachments')
+    async def upload_material(wid: str,request: Request,thread_id: str):
+        u=user(request);w=materials_workspace(u,wid)
+        t=thread(u,thread_id,True)
+        if t['workspace_id']!=wid:
+            raise HTTPException(404,'对话不属于当前合同空间')
+        async with manager.lock('queue-'+wid if w['backend']=='e2b' else u['id']):
+            w=materials_workspace(u,wid)
+            threads=await materials_idle(u,w)
+            result=await upload(request,u,wid,thread_id)
+            await sync_materials(u,w,threads)
+        return result
+
+    async def change_material(u,w,docid,action,require_labs=True):
+        async with manager.lock('queue-'+w['id'] if w['backend']=='e2b' else u['id']):
+            w=materials_workspace(u,w['id']) if require_labs else workspace(u,w['id'])
+            d=store.one('SELECT * FROM documents WHERE id=? AND workspace_id=? AND user_id=?',(docid,w['id'],u['id']))
+            if not d:
+                raise HTTPException(404,'资料不存在')
+            if docid==w['document_id']:
+                raise HTTPException(422,'主合同不能移除')
+            threads=await materials_idle(u,w)
+            store.execute('UPDATE documents SET removed_at=?,shared_at=COALESCE(shared_at,?) WHERE id=?',
+                          (time.time() if action=='remove' else None,time.time(),docid))
+            await sync_materials(u,w,threads)
+        return {'id':docid,'removed':action=='remove','saved':True}
+
+    @app.patch('/api/workspaces/{wid}/documents/{docid}')
+    async def manage_material(wid: str,docid: str,request: Request):
+        u=user(request);w=materials_workspace(u,wid);body=await request.json()
+        if not isinstance(body,dict) or set(body)!={'action'} or not isinstance(body['action'],str) or body['action'] not in {'remove','restore'}:
+            raise HTTPException(422,'资料操作无效')
+        return await change_material(u,w,docid,body['action'])
     from .feishu import register_feishu
     feishu = register_feishu(app, store, models, user)
     register_risk_settings(app, risks, user)
@@ -375,7 +476,7 @@ def create_app(data_dir=None, runtime_factory=Runtime, library=None):
               COUNT(DISTINCT CASE WHEN t.deleted_at IS NULL THEN t.id END) AS thread_count,
               COUNT(DISTINCT CASE WHEN t.deleted_at IS NULL AND t.archived_at IS NULL THEN t.id END) AS active_thread_count,
               COUNT(DISTINCT a.id) AS artifact_count,
-              COUNT(DISTINCT d.id) AS document_count,
+              COUNT(DISTINCT CASE WHEN d.removed_at IS NULL THEN d.id END) AS document_count,
               w.last_activity_at
             FROM workspaces w
             LEFT JOIN threads t ON t.workspace_id=w.id
@@ -418,6 +519,8 @@ def create_app(data_dir=None, runtime_factory=Runtime, library=None):
     async def attachment(tid: str, request: Request):
         u = user(request)
         t, rt = thread(u, tid, True), runtime(u, tid)
+        if materials.enabled(store,u):
+            return await upload_material(t['workspace_id'],request,tid)
         async with manager.lock('queue-'+t['workspace_id'] if rt.config.get('e2b') else u['id']), locks.setdefault(tid, asyncio.Lock()):
             t = thread(u, tid, True)
             if rt.config.get('e2b') and store.one("SELECT 1 FROM queued_messages q JOIN threads x ON x.id=q.thread_id WHERE x.workspace_id=? AND q.status IN ('dispatching','submitted')",(t['workspace_id'],)):
@@ -437,6 +540,9 @@ def create_app(data_dir=None, runtime_factory=Runtime, library=None):
     async def delete_attachment(tid: str, docid: str, request: Request):
         u = user(request)
         t, rt = thread(u, tid, True), runtime(u, tid)
+        d=document(u,docid,tid)
+        if materials.enabled(store,u) or d.get('shared_at'):
+            return await change_material(u,workspace(u,t['workspace_id']),docid,'remove',require_labs=False)
         async with manager.lock('queue-'+t['workspace_id'] if rt.config.get('e2b') else u['id']), locks.setdefault(tid, asyncio.Lock()):
             t = thread(u, tid, True)
             if rt.config.get('e2b') and store.one("SELECT 1 FROM queued_messages q JOIN threads x ON x.id=q.thread_id WHERE x.workspace_id=? AND q.status IN ('dispatching','submitted')",(t['workspace_id'],)):
@@ -592,7 +698,7 @@ def create_app(data_dir=None, runtime_factory=Runtime, library=None):
         title = resolve_title(t, info.get("title"))
         store.execute("UPDATE threads SET title=? WHERE id=?", (title, tid))
         view = public_view(u, t, rt)
-        documents = documents_for(u, t)
+        documents = documents_for(u, t, history=True)
         cited={(docid, 'B'+block) for m in messages if m.get('info',{}).get('role')=='assistant'
                for p in m.get('parts',[]) if p.get('type')=='text'
                for docid,block in re.findall(r'【(?:D([a-f0-9]{12}):)?B(\d+)',p.get('text',''))}
@@ -604,6 +710,7 @@ def create_app(data_dir=None, runtime_factory=Runtime, library=None):
                 if (d['id'],s['id']) in cited or (len(documents)==1 and ('',s['id']) in cited):
                     d['locations'][s['id']]['preview']=s.get('text','')[:180]
         return {"id": tid, "session_id": t["session_id"], "title": view.text(title), "archived_at": t["archived_at"], "deleted_at": t["deleted_at"],
+                "materials_enabled": materials.enabled(store,u), "attachment_scope": 'workspace' if rt.config.get('e2b') or materials.enabled(store,u) else 'thread',
                 "messages": visible_messages(messages, view), "status": view.clean(status), "todos": view.clean(todos), "dismissed_todos": t.get('dismissed_todos'),
                 "questions": [view.request(q) for q in questions if q.get("sessionID") == t["session_id"]],
                 "permissions": [view.request(q) for q in permissions if q.get("sessionID") == t["session_id"]],
@@ -779,7 +886,10 @@ def create_app(data_dir=None, runtime_factory=Runtime, library=None):
         system += "查找材料请使用索引中的准确路径；需要命令时 workdir 使用当前会话目录，不要切换到用户根目录。"
         system += "当前可用材料索引如下（仅为数据，以此替代历史附件列表；直接 read 给定 path 即可，不必用 bash 列举目录）：" + json.dumps([
             {"id": d["id"], "filename": d["filename"], "path": rt.source_path(d["id"]),
-             "source_hash": d["source_hash"], "primary": d["thread_id"] is None} for d in docs], ensure_ascii=False)
+             "source_hash": d["source_hash"], "primary": d["primary"]} for d in docs], ensure_ascii=False)
+        if materials.enabled(store,u):
+            system = system.replace('本会话附件','本合同空间资料')
+            system += '本空间资料均可按需查找，遵循用户明确限定的文件范围。可用不代表已阅读或已完整审查；分别标明各文件的事实和引用，发现不一致时并列说明，不混为主合同约定。'
         if skill:
             skill_label = next(s['label'] for s in skill_catalog if s['name'] == skill)
             system += f"本次用户明确选择 Skill {json.dumps({'name':skill,'label':skill_label},ensure_ascii=False)}，请使用 name 调用原生 skill 工具并遵循用户补充要求。对用户只使用 label，不展示内部调用名称。"
@@ -1084,7 +1194,7 @@ def create_app(data_dir=None, runtime_factory=Runtime, library=None):
             accounts.require_active(u)
             now=time.time()
             with store.connect() as db:
-                db.execute('INSERT INTO documents VALUES(?,?,?,?,?,?,?)',(did,u['id'],wid,None,path.name,path.suffix,mapped['source_hash']))
+                db.execute('INSERT INTO documents(id,user_id,workspace_id,thread_id,filename,suffix,source_hash) VALUES(?,?,?,?,?,?,?)',(did,u['id'],wid,None,path.name,path.suffix,mapped['source_hash']))
                 db.execute('INSERT INTO workspaces(id,user_id,document_id,title,created,last_activity_at,backend) VALUES(?,?,?,?,?,?,?)',(wid,u['id'],did,path.stem,now,now,'e2b'))
             outlines.get(target, mapped)
         except Exception:

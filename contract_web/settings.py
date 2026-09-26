@@ -12,6 +12,7 @@ from fastapi import HTTPException
 DEFAULTS = {"model": None, "perspective": "乙方", "permission_mode": "auto", "verbosity": "normal", "assistant_name":"合同助手", "user_nickname":"", "onboarding_completed":False, "background":"", "guidance":""}
 DEFAULTS['ui_language'] = 'zh-CN'
 DEFAULTS['memory_enabled'] = False
+DEFAULTS['materials_enabled'] = False
 DEFAULTS['redline_enabled'] = False
 DEFAULTS['trial_notice_dismissed'] = False
 
@@ -94,7 +95,7 @@ class Settings:
             if key in {'assistant_name','user_nickname'} and (not isinstance(value,str) or len(value)>32 or any(ord(c)<32 for c in value)):
                 raise ValueError('称呼最多32字，不能包含换行或控制字符')
             if key=='assistant_name' and not value.strip():raise ValueError('请填写助手名称')
-            if key in {'onboarding_completed','memory_enabled','redline_enabled','trial_notice_dismissed'} and not isinstance(value,bool):raise ValueError('引导状态无效')
+            if key in {'onboarding_completed','memory_enabled','materials_enabled','redline_enabled','trial_notice_dismissed'} and not isinstance(value,bool):raise ValueError('引导状态无效')
             if key in {'background','guidance'} and (not isinstance(value,str) or len(value)>12000):raise ValueError('补充信息最多12000字')
             if key == 'perspective' and (not isinstance(value, str) or not value.strip() or len(value) > 120):
                 raise ValueError('请填写 1–120 字的我方立场')
@@ -111,7 +112,7 @@ class Settings:
         with self.store.connect() as db:
             prior = json.loads(db.execute('SELECT preferences FROM users WHERE id=?', (u['id'],)).fetchone()['preferences'])
             # Labs uses its own field-only endpoint; general reset never changes it.
-            values = {**values, 'memory_enabled': prior.get('memory_enabled', False), 'redline_enabled': prior.get('redline_enabled', False)}
+            values = {**values, 'memory_enabled': prior.get('memory_enabled', False), 'redline_enabled': prior.get('redline_enabled', False), 'materials_enabled': prior.get('materials_enabled', False)}
             values['trial_notice_dismissed'] = prior.get('trial_notice_dismissed', False)
             if 'ui_language' not in values and 'ui_language' in prior:
                 values = {**values, 'ui_language': prior['ui_language']}

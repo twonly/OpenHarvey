@@ -63,6 +63,10 @@ class Store:
             """)
             if "model" not in {r[1] for r in db.execute("PRAGMA table_info(users)")}:
                 db.execute("ALTER TABLE users ADD COLUMN model TEXT")
+            document_columns = {r[1] for r in db.execute('PRAGMA table_info(documents)')}
+            for column in ('removed_at', 'shared_at'):
+                if column not in document_columns:
+                    db.execute(f'ALTER TABLE documents ADD COLUMN {column} REAL')
             workspace_columns = {r[1] for r in db.execute("PRAGMA table_info(workspaces)")}
             if "starred" not in workspace_columns:
                 db.execute("ALTER TABLE workspaces ADD COLUMN starred INTEGER NOT NULL DEFAULT 0")

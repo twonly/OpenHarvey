@@ -24,6 +24,7 @@ import {setupReading,setupArtifactStrip,setupQuotes,pdfMarkup,fitPdfText} from '
 import {setupDocumentNavigation} from './document-navigation.js?v=20260914-outline';
 import {RedlineEditor} from './redline.js';
 import {loadPdfPages} from './pdf-pages.js';
+import {activeDocuments,setupMaterials} from './materials-ui.js';
 
 const $=id=>document.getElementById(id);
 const redline=new RedlineEditor({
@@ -51,6 +52,13 @@ const reading=setupReading();
 const artifactStrip=setupArtifactStrip();
 const sourceNavigation=setupDocumentNavigation(navigateOutline,notice);
 const quotes=setupQuotes(()=>({source,tid}),()=>saveDraft(),notice,()=>reading.reset());
+const materialManager=setupMaterials({
+  context:()=>({enabled:!!state.materials_enabled,wid:workspace?.id,tid,busy:state.status?.type!=='idle'||!!state.queue?.active,
+    readOnly:!!workspace?.threads.find(t=>t.id===tid&&(t.archived_at||t.deleted_at))}),
+  notice,onBusy:()=>updateControls(),
+  refresh:async removed=>{if(removed)quotes.removeDocument(removed);if(tid)await restore();},
+  openSource:async id=>{await loadSource(id);reading.showSource();document.body.classList.add('context-mobile');}
+});
 new ResizeObserver(()=>fitPdfText($('sourceContent'))).observe($('sourceContent'));
 
 let workbenchRevision=0;
@@ -83,6 +91,7 @@ function notice(text='',kind='info',busy=false){clearTimeout(noticeTimer);$('not
 function protect(fn){return async(...args)=>{try{await fn(...args);}catch(e){if(e.name!=='AbortError')notice(e.message,'error');}};}
 function background(task,view=epoch){void task.catch(e=>{if(view===epoch&&e.name!=='AbortError')notice(e.message,'error');});}
 function loggedOut(){
+  materialManager.reset();
   stopPdfPages();
   memoryReceiptIDs.clear();
   identity=null;riskSchemeOptions=null;artifactLoadingId=null;
@@ -124,21 +133,21 @@ function updateControls(){
   $('permissionMode').setAttribute('aria-busy',String(permissionSaving&&permissionTarget?.tid===tid));
   $('riskSchemeSelect').disabled=readOnly||!tid||loading||!riskSchemeOptions;
   if(riskSchemeOptions&&!loading)$('riskSchemeSelect').value=state.risk_scheme||riskSchemeOptions.selected||'';
-  $('input').disabled=!tid||switching||!state.loaded||readOnly;$('sendBtn').disabled=!tid||!state.loaded||readOnly||sending||loading||!modelCatalog?.available||modelSaving||permissionSaving;
+  $('input').disabled=!tid||switching||!state.loaded||readOnly;$('sendBtn').disabled=!tid||!state.loaded||readOnly||sending||loading||!modelCatalog?.available||modelSaving||permissionSaving||materialManager.busy;
   const waiting=busy||!!(state.queue?.paused&&!state.queue?.resume_on_send)||!!state.queue?.items?.length;
   $('sendLabel').hidden=!waiting;
   $('sendLabel').textContent=(state.queue?.paused&&!state.queue?.resume_on_send)?tr('加入待发送'):tr('排队');
   $('sendBtn').classList.toggle('queue',waiting);
   $('sendBtn').setAttribute('aria-label',(state.queue?.paused&&!state.queue?.resume_on_send)?tr('加入待发送'):waiting?tr('排队发送'):tr('发送给 Agent'));
   $('sendBtn').title=(state.queue?.paused&&!state.queue?.resume_on_send)?tr('加入待发送列表；点击上方“发送”开始'):waiting?tr('加入队列，当前任务结束后依次发送'):tr('发送给 Agent');
-  $('attachButton').disabled=readOnly||!tid||busy||loading;
+  $('attachButton').disabled=readOnly||!tid||busy||loading||materialManager.busy;
   const stopping=stoppingThread===tid;
   $('stopButton').hidden=!tid||(!busy&&!stopping)||switching;
   $('stopButton').disabled=stopping;
   $('stopButton').querySelector('span').textContent=stopping?tr('正在取消…'):state.status?.type==='retry'?tr('取消重试'):tr('取消任务');
   $('artifactToolbar').inert=loading;$('compareSelect').disabled=loading;$('documentSelect').disabled=loading;$('documentToolbar').inert=loading;$('sourceTools').inert=loading;$('sourceOutline').inert=loading;
   $('newThread').disabled=!workspace||creatingThread;
-  $('railAttachButton').disabled=!tid||busy||loading||readOnly;
+  $('railAttachButton').disabled=!tid||busy||loading||readOnly||materialManager.busy;
   document.querySelectorAll('[data-skill]').forEach(b=>b.disabled=readOnly||!tid||loading);
   document.querySelectorAll('[data-delete-attachment]').forEach(b=>b.disabled=busy||loading||readOnly);
   const phase=executionPhase(state);
@@ -213,6 +222,7 @@ async function markThreadSeen(view){
 }
 
 async function selectWorkspace(wid,requestedTid){
+  materialManager.close();
   await redline.close();
   saveDraft();stopStream();viewRequests.abort();viewRequests=new AbortController();const view=++epoch;notice();
   stopPdfPages();tid=null;source=null;sourceEpoch++;artifactId=null;artifactLoadingId=null;artifactEpoch++;quotes.set([]);clearComparison();$('artifactTitle').textContent='';
@@ -324,6 +334,7 @@ function renderArtifactPicker(){
 }
 
 async function selectThread(id){
+  materialManager.close();
   if(id!==tid)await redline.close();
   if(id===tid&&!switching&&state.loaded)return;
   saveDraft();stopStream();viewRequests.abort();viewRequests=new AbortController();clearTimeout(renderTimer);renderTimer=null;fullRender=true;streamingParts.clear();const view=++epoch;tid=id;sourceEpoch++;notice();
@@ -406,9 +417,10 @@ function scheduleMessages(){
 }
 
 function renderDocs(){
-  const documents=orderedDocuments(state.documents),selected=source?.id||documents[0]?.id;
+  const active=activeDocuments(state.documents),documents=orderedDocuments(active),selected=source?.id||documents[0]?.id;
+  if(source&&!documents.some(d=>d.id===source.id)){const historic=state.documents.find(d=>d.id===source.id);if(historic)documents.push(historic);}
   const attachments=documents.filter(d=>d.thread_id);
-  const label=d=>`${d.thread_id?tr('附件'):tr('主合同')} · ${d.filename}`;
+  const label=d=>`${d.removed_at?tr('已移除'):d.historical_only?tr('历史资料'):d.thread_id?tr(state.materials_enabled?'资料':'附件'):tr('主合同')} · ${d.filename}`;
   const current=documents.find(d=>d.id===selected);
   $('documentSelect').innerHTML=documents.map(d=>`<option value="${d.id}">${esc(label(d))}</option>`).join('');
   if(selected)$('documentSelect').value=selected;
@@ -416,8 +428,16 @@ function renderDocs(){
   $('documentTitle').hidden=documents.length>1;
   $('documentTitle').textContent=current?label(current):tr('选择文档');
   $('documentTitle').title=$('documentSelect').title=current?label(current):'';
-  $('attachmentCount').textContent=attachments.length;
-  $('attachmentList').innerHTML=attachments.map(d=>ui`<div class="rail-attachment"><button data-open-attachment="${d.id}" title="${esc(d.filename)}">${icon('read')}<span><b>${esc(d.filename)}</b><small>${esc(d.suffix?.slice(1).toUpperCase()||tr('附件'))}</small></span></button><button data-delete-attachment="${d.id}" aria-label="删除附件 ${esc(d.filename)}" ${state.status.type!=='idle'||restoring?'disabled':''}>${icon('close')}</button></div>`).join('')||tr('<p class="rail-empty">暂无附件，可点击 ＋ 上传补充材料</p>');
+  const visible=state.materials_enabled?orderedDocuments(active):attachments.filter(d=>!d.historical_only);
+  $('attachmentLabel').textContent=tr(state.materials_enabled?'合同资料':'附件');
+  $('attachmentCaption').textContent=tr(state.attachment_scope==='workspace'?'本合同空间内所有对话可用':'仅用于当前对话');
+  $('attachmentCount').textContent=visible.length;
+  $('materialsManage').hidden=$('materialScope').hidden=!state.materials_enabled;
+  $('materialScope').textContent=tr('可用资料')+' '+active.length+' · '+tr('按问题查找');
+  $('attachmentInput').multiple=!!state.materials_enabled;
+  $('attachButton').textContent=tr(state.materials_enabled?'＋ 添加资料':'＋ 附件');
+  $('railAttachButton').setAttribute('aria-label',tr(state.materials_enabled?'添加合同资料':'上传附件'));
+  $('attachmentList').innerHTML=visible.map(d=>ui`<div class="rail-attachment"><button data-open-attachment="${d.id}" title="${esc(d.filename)}">${icon('read')}<span><b>${esc(d.filename)}</b><small>${esc(d.primary?tr('主合同'):d.suffix?.slice(1).toUpperCase()||tr('附件'))}</small></span></button>${state.materials_enabled?'':`<button data-delete-attachment="${d.id}" aria-label="${tr('删除附件')} ${esc(d.filename)}" ${state.status.type!=='idle'||restoring?'disabled':''}>${icon('close')}</button>`}</div>`).join('')||tr('<p class="rail-empty">暂无附件，可点击 ＋ 上传补充材料</p>');
 }
 
 function renderMessages(streaming=false){
@@ -583,8 +603,8 @@ async function openArtifact(id,asCompare=false,reveal=true){
   if(!asCompare&&id===compareId)clearComparison();
   artifactData.set(id,data);
   if(reveal)document.body.classList.remove('rail-mobile');
-  if(asCompare){compareId=id;$('compareColumn').hidden=false;$('compareBody').innerHTML=artifactHTML(data,state.documents,tid);$('compareSelect').title=data.title;}
-  else{artifactId=id;$('artBody').innerHTML=artifactHTML(data,state.documents,tid);$('artifactTitle').textContent=data.title;
+  if(asCompare){compareId=id;$('compareColumn').hidden=false;$('compareBody').innerHTML=artifactHTML(data,state.documents,tid,state.materials_enabled);$('compareSelect').title=data.title;}
+  else{artifactId=id;$('artBody').innerHTML=artifactHTML(data,state.documents,tid,state.materials_enabled);$('artifactTitle').textContent=data.title;
     $('artifactDownloads').innerHTML=(data.formats||['md','docx']).map(f=>ui`<a href="/api/artifacts/${id}/file?format=${f}">下载 ${f==='docx'?'Word':f.toUpperCase()}</a>`).join('');}
   renderArtifactPicker();$('artifactMore').open=false;
   if(reveal){document.body.classList.add('context-mobile');document.querySelector('main').classList.remove('context-closed');}
@@ -617,7 +637,7 @@ function renderSkillPicker(){
 function pickSkill(name){$('input').value=$('input').value.replace(/^\/[^\s]*(?:[ \t]+|\n)?/,'');setSkill(name);hideSkillPicker();saveDraft();$('input').focus();}
 
 async function send(){
-  if(!tid||!state.loaded||sending||restoring||switching||!selectedModel||modelSaving)return;
+  if(!tid||!state.loaded||sending||restoring||switching||!selectedModel||modelSaving||materialManager.busy)return;
   if(!modelCatalog?.available){notice(tr('试用次数已用完，请配置自己的模型。'),'error');return;}
   await redline.flush();
   let entered=$('input').value.trim();
@@ -796,7 +816,8 @@ $('newThread').onclick=protect(async()=>{
   }finally{creatingThread=false;updateControls();}
 });
 $('attachButton').onclick=$('railAttachButton').onclick=()=>$('attachmentInput').click();
-$('attachmentInput').onchange=protect(async e=>{const file=e.target.files[0];if(!file)return;await upload(`/api/threads/${tid}/attachments`,file);e.target.value='';await restore();});
+$('materialsManage').onclick=$('materialScope').onclick=()=>materialManager.open();
+$('attachmentInput').onchange=protect(async e=>{const files=Array.from(e.target.files);e.target.value='';if(!files.length)return;if(state.materials_enabled){await materialManager.add(files);return;}await upload(`/api/threads/${tid}/attachments`,files[0]);await restore();});
 $('sendBtn').onclick=protect(send);$('input').oninput=()=>{const command=skillCommand($('input').value);if(command&&skillCatalog.some(s=>s.name===command[1])){setSkill(command[1]);$('input').value=withoutSkillCommand($('input').value,command[1]);}saveDraft();skillIndex=0;renderSkillPicker();};
 $('input').onkeydown=e=>{
   if(e.isComposing)return;

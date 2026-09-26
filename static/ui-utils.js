@@ -4,6 +4,7 @@ import {esc,markdown,citations} from './markdown.js';
 import {visibleMessageIssue,isCompaction,isCompactionContinuation} from './events.js';
 import {riskBoard} from './risk-ui.js';
 import {memoryReferencesHTML} from './memory-ui.js';
+import {sourceReferencesHTML} from './materials-ui.js';
 import {toolHTML,thinkingHTML} from './agent-ui.js?v=20260913-2';
 import {skillLabel,skillCommand,skillMessage} from './skill-labels.js';
 
@@ -52,6 +53,7 @@ export function conversationHTML(state,open=new Set()){
         content+=toolHTML(p,state.status.type==='idle'||index<currentTurn,open);
       }
     }
+    if(state.materials_enabled&&m.info.role==='assistant')content+=sourceReferencesHTML((m.parts||[]).filter(p=>p.type==='text').map(p=>p.text||'').join('\n'),state.documents);
     if(m.info.role==='assistant')content+=memoryReferencesHTML(m.parts||[],open,m.info.id);
     const issue=visibleMessageIssue(state,index);
     if(issue)content+=`<p class="chat-error">${esc(issue)}</p>`;
@@ -82,9 +84,10 @@ export function csvRows(text){
   return rows;
 }
 
-export function artifactHTML(data,documents,threadId){
+export function artifactHTML(data,documents,threadId,materialsEnabled=false){
   const preview=artifactPreview(data,documents,threadId);
-  return data.kind==='review'&&data.findings?.length?riskBoard(data,documents)+ui`<details class="report-full"><summary>查看完整报告</summary>${preview}</details>`:preview;
+  const result=data.kind==='review'&&data.findings?.length?riskBoard(data,documents)+ui`<details class="report-full"><summary>查看完整报告</summary>${preview}</details>`:preview;
+  return result+(materialsEnabled?sourceReferencesHTML(data.content,documents):'');
 }
 function artifactPreview(data,documents,threadId){
   const fmt=data.format||'md';

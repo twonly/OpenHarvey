@@ -414,6 +414,24 @@ class E2BTests(unittest.TestCase):
         other,ot=self.make_workspace();self.assertEqual(self.client.get('/api/documents/'+d['id']+'?thread_id='+ot['id']).status_code,404)
         self.assertEqual(FakeSandbox.created,0)
 
+    def test_materials_labs_remove_unmounts_source_but_preserves_history(self):
+        status=self.client.get('/api/settings/labs').json()
+        self.client.patch('/api/settings/labs',json={'materials_enabled':True,'revision':status['revision']},headers=self.headers).raise_for_status()
+        w,t=self.make_workspace()
+        result=self.client.post(f'/api/workspaces/{w["id"]}/attachments?thread_id={t["id"]}',content=b'Quote: 120000 yuan.',headers={**self.headers,'X-Filename':'quote.txt'})
+        self.assertEqual(result.status_code,200,result.text)
+        a=result.json();self.assertEqual(FakeSandbox.created,0)
+        self.assertEqual(self.send(t).status_code,202)
+        sbx=self.sandbox(w);prefix='/workspace/input/'+a['id']+'/'
+        self.assertTrue(any(p.startswith(prefix) for p in sbx.files.data))
+        self.finish(w,t);self.run_async(self.app.state.queue.tick(self.u,t['id']))
+        r=self.client.patch(f'/api/workspaces/{w["id"]}/documents/{a["id"]}',json={'action':'remove'},headers=self.headers)
+        self.assertEqual(r.status_code,200,r.text)
+        self.assertFalse(any(p.startswith(prefix) for p in sbx.files.data))
+        self.assertEqual(self.client.get(f'/api/documents/{a["id"]}/file?thread_id={t["id"]}').status_code,200)
+        context=json.loads(sbx.files.data['/workspace/threads/'+t['id']+'/context.json'])
+        self.assertEqual([d['id'] for d in context['documents']],[w['document_id']])
+
     def test_dispatch_syncs_versioned_materials_and_private_port(self):
         w,t=self.make_workspace();r=self.send(t)
         self.assertEqual(r.status_code,202,r.text);self.assertEqual(r.json()['status'],'submitted',r.text)
@@ -725,7 +743,7 @@ class E2BTests(unittest.TestCase):
         w,t=self.make_workspace()
         root=self.store.user_root(self.uid)
         private=root/'sources'/w['document_id']/'redline';private.mkdir();(private/'working-native-secret.docx').write_bytes(b'private working bytes')
-        self.store.execute('INSERT INTO documents VALUES(?,?,?,?,?,?,?)',('attached-redline',self.uid,w['id'],t['id'],'private.docx','.docx','private-hash'))
+        self.store.execute('INSERT INTO documents(id,user_id,workspace_id,thread_id,filename,suffix,source_hash) VALUES(?,?,?,?,?,?,?)',('attached-redline',self.uid,w['id'],t['id'],'private.docx','.docx','private-hash'))
         out=root/'published'/'private-redline';out.mkdir(parents=True)
         (out/'content.docx').write_bytes(b'private exported bytes')
         (out/'report.json').write_text(encoded({'redline':True,'document_id':'attached-redline','format':'docx'}))

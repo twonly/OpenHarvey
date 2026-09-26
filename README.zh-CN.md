@@ -4,10 +4,16 @@
 
 支持原文溯源、自定义风险库与自托管选项。[查看开源 Harvey 替代方案介绍](https://openharvey.com/harvey-alternative)，了解实际工作流、部署与运行费用。OpenHarvey 是独立项目，与 Harvey 无关联，不宣称功能全面对等。
 
-[English](README.md) · [官网](https://openharvey.com) · [在线试用](https://openharvey.com/demo) · [部署说明](docs/deployment.md)
+[English](README.md) · [官网](https://openharvey.com) · [在线试用](https://openharvey.com/demo) · [部署说明](docs/deployment.md) · [在线说明书](https://openharvey.com/guide#materials) · [合同资料使用手册](docs/materials-labs.zh-CN.md)
 
 把主合同、附件、对话、风险判断和产出放到同一个工作空间，支持点击有效引用定位原文、连续段落高亮、原文与报告并排核对。
 
+
+## 合同资料 Labs
+
+在设置 → Labs 开启合同资料，即可在同一合同空间的对话间使用补充文件，支持批量上传、查找、移除与恢复，并保留历史引用。默认关闭，按个人账号生效；托管站可用性以部署版本为准。
+
+[操作手册](docs/materials-labs.zh-CN.md) · [在线说明书](https://openharvey.com/guide#materials)
 
 ## 新增：Memory 与合同审阅批注
 

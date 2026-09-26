@@ -25,7 +25,7 @@ class RedlineTests(unittest.IsolatedAsyncioTestCase):
         self.u=self.store.one('SELECT * FROM users WHERE id=?',(uid,))
         self.store.execute('INSERT INTO workspaces(id,user_id,document_id,title,created) VALUES(?,?,?,?,?)',('workspace',uid,'doc','合同',1))
         self.t={'id':'thread','workspace_id':'workspace'}
-        self.store.execute('INSERT INTO documents VALUES(?,?,?,?,?,?,?)',('doc',uid,'workspace',None,'合同.docx','.docx','original-hash'))
+        self.store.execute('INSERT INTO documents(id,user_id,workspace_id,thread_id,filename,suffix,source_hash) VALUES(?,?,?,?,?,?,?)',('doc',uid,'workspace',None,'合同.docx','.docx','original-hash'))
         self.d=self.store.one('SELECT * FROM documents WHERE id=?',('doc',))
         folder=self.store.user_root(uid)/'sources/doc';folder.mkdir(parents=True)
         doc=Document();doc.add_heading('采购合同',0);doc.add_paragraph('付款期限为30天。');doc.add_paragraph('其他条款保持不变。')

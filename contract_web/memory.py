@@ -238,12 +238,6 @@ class MemoryProjection:
 
 
 def register_memory(app, memory, user):
-    @app.get('/api/settings/labs')
-    async def labs(request: Request): return memory.status(user(request))
-
-    @app.patch('/api/settings/labs')
-    async def update_labs(request: Request): return memory.set_enabled(user(request), await request.json())
-
     @app.get('/api/memories')
     async def items(request: Request):
         rows = memory.items(user(request))
