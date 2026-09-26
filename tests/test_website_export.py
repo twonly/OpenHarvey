@@ -15,7 +15,9 @@ class WebsiteExportTests(unittest.TestCase):
         for path in ('/connectors','/demo','/login','/agent','/model','/ops','/ops/:path*','/api/:path*','/static/:path*','/auth/:path*','/orca/:path*','/trial-model/:path*'):
             self.assertEqual(routes[path],'https://backend.example.com'+path)
         self.assertNotIn('/internal/:path*',routes)
-        self.assertNotIn('/guide',routes)
+        guide_rule=next(r for r in config['rewrites'] if r['source']=='/guide')
+        self.assertEqual(guide_rule['has'],[{'type':'query','key':'topic','value':'review-tables'}])
+        self.assertEqual(guide_rule['destination'],'https://backend.example.com/guide?topic=review-tables')
         for row in config['headers']:
             if any(h['key']=='Content-Security-Policy' for h in row['headers']):
                 self.assertIn(row['source'],PUBLIC_PATHS)

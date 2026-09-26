@@ -31,7 +31,8 @@ def hosting_config(workbench_origin):
         {'key':'CDN-Cache-Control','value':'no-store'},
         {'key':'x-vercel-enable-rewrite-caching','value':'0'}]} for path in WORKBENCH_PATHS]
     return {'cleanUrls':True,'trailingSlash':False,'headers':headers,
-        'rewrites':[{'source':path,'destination':origin+path} for path in WORKBENCH_PATHS],
+        'rewrites':[{'source':'/guide','has':[{'type':'query','key':'topic','value':'review-tables'}],
+                     'destination':origin+'/guide?topic=review-tables'}]+[{'source':path,'destination':origin+path} for path in WORKBENCH_PATHS],
         'redirects':[{'source':'/landing','destination':'/','permanent':True}]}
 
 def main():
